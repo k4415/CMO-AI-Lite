@@ -1,0 +1,85 @@
+{
+  "version": "4.1",
+  "cases": [
+    {
+      "id": "cpa-design-ambiguous",
+      "kind": "blind_review",
+      "readoutText": "CPA設計までつなぐ",
+      "slotTexts": [{ "slotId": "hook", "canonicalField": "mainHook", "text": "CPA設計までつなぐ" }],
+      "review": {
+        "scores": { "clarity": 4, "specificity": 4 },
+        "communicationReview": {
+          "decodedProductOrTask": "特定できない",
+          "decodedPromise": "何かをCPA設計へつなぐ",
+          "decodedMechanism": "",
+          "decodedOffer": "",
+          "numberMeanings": [],
+          "evidenceSpans": [{ "text": "CPA設計までつなぐ", "supports": "ambiguous_message" }],
+          "ambiguities": [{ "code": "object_missing", "severity": "critical", "message": "何をつなぐか分からない" }],
+          "productOrTaskUnderstood": false,
+          "primaryPromiseUnderstood": false,
+          "singleMessageFocus": true,
+          "numberMeaningUnambiguous": true,
+          "offerConditionUnderstood": true,
+          "audienceRelevanceUnderstood": false
+        },
+        "warnings": []
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "choco-fragmented-group",
+      "kind": "blind_review",
+      "readoutText": "チョコ / 満たす / これ",
+      "slotTexts": [
+        { "slotId": "hook-1", "canonicalField": "mainHook", "text": "チョコ" },
+        { "slotId": "hook-2", "canonicalField": "mainHook", "text": "満たす" },
+        { "slotId": "hook-3", "canonicalField": "mainHook", "text": "これ" }
+      ],
+      "review": {
+        "scores": { "clarity": 4, "specificity": 4 },
+        "communicationReview": {
+          "decodedProductOrTask": "チョコ系食品らしい",
+          "decodedPromise": "特定できない",
+          "decodedMechanism": "",
+          "decodedOffer": "",
+          "numberMeanings": [],
+          "evidenceSpans": [{ "text": "チョコ", "supports": "product_or_task" }],
+          "ambiguities": [{ "code": "fragmented_semantic_group", "severity": "critical", "message": "枠をつないでも自然な命題にならない" }],
+          "productOrTaskUnderstood": true,
+          "primaryPromiseUnderstood": false,
+          "singleMessageFocus": false,
+          "numberMeaningUnambiguous": true,
+          "offerConditionUnderstood": true,
+          "audienceRelevanceUnderstood": false
+        },
+        "warnings": []
+      },
+      "expected": "failed"
+    },
+    {
+      "id": "additional-instruction-one-month",
+      "kind": "strategy_alignment",
+      "copy": "漫画家依頼だと1ヶ月",
+      "strategy": "漫画広告を今週中に検証したい",
+      "additionalInstruction": "漫画家依頼だと1ヶ月かかる比較を入れてください",
+      "expected": "passed"
+    },
+    {
+      "id": "protein-snack-shared-anchor",
+      "kind": "originality",
+      "copy": "甘党にたんぱく軽食",
+      "chosenAngle": "benefit",
+      "mandatorySharedAnchors": ["甘党にたんぱく軽食"],
+      "expected": "passed"
+    },
+    {
+      "id": "unsupported-98-percent",
+      "kind": "strategy_alignment",
+      "copy": "満足度98%",
+      "strategy": "広告判断を早める",
+      "additionalInstruction": "",
+      "expected": "warning"
+    }
+  ]
+}

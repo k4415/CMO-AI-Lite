@@ -1,0 +1,349 @@
+﻿<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CMO AI Lite</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="icon" type="image/png" href="/assets/faviconV2.png?v=20260709" />
+    <link rel="stylesheet" href="/styles.css?v=20260714-content-preview" />
+  </head>
+  <body>
+    <div id="toastStack" class="toastStack" aria-live="polite"></div>
+    <main class="appShell">
+      <header class="appTopbar">
+        <div class="appTopbarLeft">
+          <img class="appTopbarLogo" src="/assets/logo.png" alt="CMO AI Lite" />
+        </div>
+        <div class="appTopbarRight">
+          <button id="sidebarStatusButton" class="sidebarStatusButton" type="button" title="設定を開く">
+            <span id="sidebarStatusDot" class="sidebarStatusDot"></span>
+            <span id="sidebarStatusText" class="sidebarStatusText">未確認</span>
+          </button>
+          <button id="topbarSettingsButton" class="topbarIconButton" type="button" title="設定" aria-label="設定">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+      </header>
+      <div class="appBody">
+      <button id="toggleSidebar" class="sidebarToggle sidebarBoundaryToggle" type="button" aria-label="サイドバーを閉じる" title="サイドバーを閉じる">&#x2039;</button>
+      <aside class="sidebar">
+        <section class="sideSection">
+          <select id="projectSelect" class="projectSelect projectSelectHidden" aria-hidden="true" tabindex="-1"></select>
+          <button id="openProjectSwitcher" class="projectSwitchButton" type="button" aria-haspopup="dialog">
+            <span id="projectSwitchAvatar" class="projectSwitchAvatar" aria-hidden="true"></span>
+            <span class="projectSwitchText">
+              <span id="projectSwitchName">&#x6848;&#x4EF6;&#x672A;&#x9078;&#x629E;</span>
+              <small id="projectSwitchProduct">&#x5546;&#x54C1;&#x60C5;&#x5831;&#x306A;&#x3057;</small>
+            </span>
+            <svg class="projectSwitchChevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>
+          </button>
+          <button id="openProjectModal" class="newProjectInline" type="button">&#xFF0B; &#x65B0;&#x898F;&#x6848;&#x4EF6;</button>
+          <div id="projectMeta" class="projectMeta"></div>
+        </section>
+
+        <div class="sideDivider"></div>
+
+        <section class="sideSection">
+          <button class="navItem active" data-workspace="home" type="button" title="&#x6848;&#x4EF6;&#x30DB;&#x30FC;&#x30E0;"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3.5 11.5 12 4l8.5 7.5"/><path d="M5.5 10v8.5a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-3.5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3.5a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1V10"/></svg></span><b>&#x30DB;&#x30FC;&#x30E0;</b></button>
+          <button class="navItem" data-workspace="products" type="button" title="&#x5546;&#x54C1;&#x60C5;&#x5831; / &#x8868;&#x73FE;&#x30EC;&#x30AE;&#x30E5;&#x30EC;&#x30FC;&#x30B7;&#x30E7;&#x30F3;"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="7.5" width="13" height="13" rx="2"/><path d="M8 7.5V6a2 2 0 0 1 2-2h8.5a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H19"/></svg></span><b>&#x524D;&#x63D0;&#x60C5;&#x5831;</b></button>
+          <button class="navItem" data-workspace="facts" type="button" title="事実リサーチ"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6"/><path d="m19.5 19.5-4.8-4.8"/></svg></span><b>&#x30EA;&#x30B5;&#x30FC;&#x30C1;</b></button>
+          <button class="navItem" data-workspace="strategies" type="button" title="戦略"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg></span><b>戦略</b></button>
+          <button class="navItem" data-workspace="banners" type="button" title="&#x5236;&#x4F5C;"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4.5 19.5h15"/><path d="m7 16.5 9-9a1.7 1.7 0 0 1 2.4 0l.6.6a1.7 1.7 0 0 1 0 2.4l-9 9L6 20z"/></svg></span><b>&#x5236;&#x4F5C;</b></button>
+        </section>
+
+        <div class="sideDivider"></div>
+
+        <section class="sideSection">
+          <button class="navItem" data-workspace="adTemplates" type="button" title="&#x5E83;&#x544A;&#x30C6;&#x30F3;&#x30D7;&#x30EC;DB"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="7.5" width="13" height="13" rx="2"/><path d="M8 7.5V6a2 2 0 0 1 2-2h8.5a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H19"/></svg></span><b>&#x5E83;&#x544A;&#x30C6;&#x30F3;&#x30D7;&#x30EC;</b></button>
+          <a class="navItem navProLink" href="https://cmoai.jp/" target="_blank" rel="noopener noreferrer" title="CMO AI Proの公式サイトを開く"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 14.4 8.6 20 11l-5.6 2.4L12 19l-2.4-5.6L4 11l5.6-2.4Z"/></svg></span><b>CMO AI Pro</b><em class="navItemBadge">詳しく見る</em></a>
+          <button class="navItem" data-workspace="settings" type="button" title="&#x8A2D;&#x5B9A;"><span class="navIcon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span><b>&#x8A2D;&#x5B9A;</b></button>
+        </section>
+
+        <div class="sidebarBottom">
+          <a id="sidebarHelpCard" class="sidebarHelpCard" href="https://cmoai.jp/" target="_blank" rel="noopener noreferrer">
+            <span class="sidebarHelpIcon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></span>
+            <span class="sidebarHelpText"><b>CMO AI Liteの使い方</b><small>はじめての方はこちら</small></span>
+          </a>
+          <div class="sidebarFooterMeta"><span>© CMO AI, Inc.</span><span>v0.1.0</span></div>
+        </div>
+      </aside>
+
+      <section class="workArea">
+        <header class="workspaceHeader">
+          <div>
+            <div class="breadcrumb">CMO AI Lite / &#x6848;&#x4EF6;&#x30DB;&#x30FC;&#x30E0;</div>
+            <h1>&#x6848;&#x4EF6;&#x30DB;&#x30FC;&#x30E0;</h1>
+            <p id="selectedProjectLabel">&#x6848;&#x4EF6;&#x3092;&#x9078;&#x629E;&#x3057;&#x3066;&#x304F;&#x3060;&#x3055;&#x3044;</p>
+          </div>
+          <div id="viewStats" class="viewStats"></div>
+        </header>
+
+        <section class="dbSurface">
+          <div class="tabBar" role="tablist" style="display:none">
+            <button class="tabButton active" data-view="products" data-group="foundation" type="button">&#x5546;&#x54C1;&#x60C5;&#x5831;</button>
+            <button class="tabButton" data-view="rules" data-group="foundation" type="button">&#x8868;&#x73FE;&#x30EC;&#x30AE;&#x30E5;&#x30EC;&#x30FC;&#x30B7;&#x30E7;&#x30F3;</button>
+            <button class="tabButton" data-view="images" data-group="foundation" type="button">&#x753B;&#x50CF;</button>
+            <button class="tabButton" data-view="facts" data-group="research" type="button">&#x4E8B;&#x5B9F;</button>
+          </div>
+
+          <section class="viewPanel active" data-panel="home">
+            <div class="viewHeader"><p class="viewDescription">&#x30EA;&#x30B5;&#x30FC;&#x30C1;&#x304B;&#x3089;&#x5236;&#x4F5C;&#x307E;&#x3067;&#x306E;&#x9032;&#x6357;&#x3068;&#x3001;&#x6B21;&#x306B;&#x3084;&#x308B;&#x3053;&#x3068;&#x3092;&#x4E00;&#x76EE;&#x3067;&#x78BA;&#x8A8D;&#x3067;&#x304D;&#x307E;&#x3059;&#x3002;</p></div>
+            <div class="homeOnboardingWrap" id="homeOnboardingWrap" hidden></div>
+            <div class="homePipeline" id="homePipeline"></div>
+            <div class="homeNextAction" id="homeNextAction"></div>
+            <section class="homeRecentSection" id="homeRecentSection" hidden>
+              <h3>&#x6700;&#x8FD1;&#x306E;&#x751F;&#x6210;&#x7269;</h3>
+              <div class="homeRecentGrid" id="homeRecentGrid"></div>
+            </section>
+          </section>
+
+          <section class="viewPanel" data-panel="products">
+            <div class="viewHeader"><p class="viewDescription">&#x5546;&#x54C1;&#x306E;&#x57FA;&#x672C;&#x60C5;&#x5831;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p></div>
+            <div id="products" class="productProfileRoot"></div>
+          </section>
+
+          <section class="viewPanel" data-panel="images">
+            <div class="viewHeader"><p class="viewDescription">&#x30D0;&#x30CA;&#x30FC;&#x751F;&#x6210;&#x3067;&#x4F7F;&#x3046;&#x5546;&#x54C1;&#x5199;&#x771F;&#x3001;&#x30ED;&#x30B4;&#x3001;&#x305D;&#x306E;&#x4ED6;&#x306E;&#x7D20;&#x6750;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p></div>
+            <div id="productImages" class="productProfileRoot"></div>
+          </section>
+
+          <section class="viewPanel" data-panel="facts">
+            <div class="viewHeader"><p class="viewDescription">&#x5E83;&#x544A;&#x30FB;LP&#x306E;&#x6839;&#x62E0;&#x306B;&#x306A;&#x308B;&#x4E8B;&#x5B9F;&#x3092;1&#x884C;1&#x4E8B;&#x5B9F;&#x3067;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p><div class="viewHeaderActions">
+              <button id="openResearchSourceImport" class="secondaryButton" type="button">&#x66F8;&#x304D;&#x51FA;&#x3057;&#x3092;&#x53D6;&#x308A;&#x8FBC;&#x3080;</button><button id="exportFactsCsv" class="secondaryButton" type="button">CSV&#x51FA;&#x529B;</button><button id="runFactExtraction" class="inlineAddButton" type="button">URL&#x304B;&#x3089;&#x4E8B;&#x5B9F;&#x62BD;&#x51FA;</button></div></div>
+            <div id="researchWorkflowProgress" class="researchWorkflowProgress" aria-live="polite" hidden></div>
+            <div id="researchSourceImportPanel" class="researchSourceImportPanel" hidden>
+              <div class="researchSourceImportHeader"><div><strong>&#x66F8;&#x304D;&#x51FA;&#x3057;&#x7D50;&#x679C;&#x3092;&#x53D6;&#x308A;&#x8FBC;&#x3080;</strong><p>LP&#x306E;&#x66F8;&#x304D;&#x51FA;&#x3057;&#x3001;&#x8B70;&#x4E8B;&#x9332;&#x3001;&#x30EA;&#x30B5;&#x30FC;&#x30C1;&#x539F;&#x6587;&#x3092;&#x6839;&#x62E0;&#x8CC7;&#x6599;&#x3068;&#x3057;&#x3066;&#x4FDD;&#x5B58;&#x3057;&#x3001;&#x305D;&#x306E;&#x672C;&#x6587;&#x304B;&#x3089;&#x4E8B;&#x5B9F;&#x3092;&#x62BD;&#x51FA;&#x3057;&#x307E;&#x3059;&#x3002;</p></div><button id="closeResearchSourceImport" type="button" aria-label="&#x9589;&#x3058;&#x308B;">&#x00D7;</button></div>
+              <div class="researchSourceImportFields"><label><span>&#x8CC7;&#x6599;&#x540D;</span><input id="researchSourceTitle" class="tableInput" placeholder="&#x4F8B;: ChatGPT&#x3067;&#x66F8;&#x304D;&#x51FA;&#x3057;&#x305F;LP" /></label><label><span>&#x51FA;&#x5178;URL&#xFF08;&#x4EFB;&#x610F;&#xFF09;</span><input id="researchSourceUrl" class="tableInput" type="url" placeholder="https://..." /></label></div>
+              <label><span>&#x6839;&#x62E0;&#x539F;&#x6587;</span><textarea id="researchSourceText" class="textEditorArea" rows="12" spellcheck="false" placeholder="LP&#x306E;&#x66F8;&#x304D;&#x51FA;&#x3057;&#x3084;&#x30EA;&#x30B5;&#x30FC;&#x30C1;&#x7D50;&#x679C;&#x3092;&#x3053;&#x3053;&#x306B;&#x8CBC;&#x308A;&#x4ED8;&#x3051;"></textarea></label>
+              <div class="researchSourceImportActions"><span>&#x539F;&#x6587;&#x306F;&#x5185;&#x90E8;&#x306E;&#x8CC7;&#x6599;DB&#x306B;&#x4FDD;&#x5B58;&#x3055;&#x308C;&#x3001;&#x62BD;&#x51FA;&#x3057;&#x305F;&#x4E8B;&#x5B9F;&#x304B;&#x3089;&#x53C2;&#x7167;&#x3067;&#x304D;&#x307E;&#x3059;&#x3002;</span><button id="saveResearchSourceAndExtract" class="inlineAddButton" type="button">&#x4FDD;&#x5B58;&#x3057;&#x3066;&#x4E8B;&#x5B9F;&#x62BD;&#x51FA;</button></div>
+            </div>
+            <div class="viewToggleRow">
+              <div class="viewToggle" role="group" aria-label="表示切替">
+                <button class="viewToggleItem active" type="button" data-summary-view="facts" data-summary-mode="summary"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>サマリー</button>
+                <button class="viewToggleItem" type="button" data-summary-view="facts" data-summary-mode="list"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M3.5 10h17"/><path d="M9.5 4.5v15"/></svg>一覧・引用元</button>
+              </div>
+            </div>
+            <div class="viewSummaryPanel" id="factsSummary"></div>
+            <div class="tableWrap" id="factsTableWrap" hidden><table class="dataTable factsTable"><thead><tr><th>&#x5546;&#x54C1;</th><th>&#x30AB;&#x30C6;&#x30B4;&#x30EA;</th><th>&#x540D;&#x524D;</th><th>&#x5185;&#x5BB9;</th><th>&#x4F5C;&#x6210;&#x8005;</th><th>&#x5F15;&#x7528;&#x5143;</th><th></th></tr></thead><tbody class="tableAddBody"><tr><td colspan="7"><div class="addRowPanel" id="factsAddPanel"></div></td></tr></tbody><tbody id="facts"></tbody></table></div>
+            <div class="textEditorPanel" id="factsEditorPanel">
+              <div class="contentModeTabs" role="tablist" aria-label="事実の表示切替">
+                <button class="contentModeTab active" type="button" role="tab" aria-selected="true" data-facts-content-mode="preview">プレビュー</button>
+                <button class="contentModeTab" type="button" role="tab" aria-selected="false" data-facts-content-mode="edit">編集</button>
+              </div>
+              <div id="factsPreviewPanel" class="structuredTextPreview"></div>
+              <div id="factsEditPanel" hidden>
+                <div class="textEditorControls">
+                  <p class="textEditorHint">&#x300C;## &#x533A;&#x5206;&#x300D;&#x898B;&#x51FA;&#x3057;&#xFF08;&#x7279;&#x5FB4;&#x30FB;&#x30E1;&#x30EA;&#x30C3;&#x30C8;&#x30FB;&#x5B9F;&#x7E3E;&#x30FB;&#x6A29;&#x5A01;&#x6027;&#x30FB;&#x30AA;&#x30D5;&#x30A1;&#x30FC;&#x306E;5&#x533A;&#x5206;&#x56FA;&#x5B9A;&#xFF09;&#x3054;&#x3068;&#x306B;&#x300C;- &#x5185;&#x5BB9;&#x300D;&#x3067;1&#x884C;1&#x4E8B;&#x5B9F;&#x3092;&#x66F8;&#x304D;&#x307E;&#x3059;&#x3002;</p>
+                  <button id="saveFactsEditor" class="inlineAddButton" type="button">&#x4FDD;&#x5B58;</button>
+                </div>
+                <textarea id="factsEditorTextarea" class="textEditorArea" rows="18" spellcheck="false"></textarea>
+              </div>
+              <div id="factsResearchEvidence" class="factsResearchEvidence" hidden></div>
+            </div>
+          </section>
+
+          <section class="viewPanel" data-panel="rules">
+            <div class="viewHeader"><p class="viewDescription">&#x5546;&#x54C1;&#x3054;&#x3068;&#x306E;NG&#x8868;&#x73FE;&#x3001;&#x4EE3;&#x66FF;&#x8868;&#x73FE;&#x3001;&#x6CE8;&#x8A18;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p><div class="viewHeaderActions">
+              <input id="regulationImportFile" type="file" accept=".pdf,.xlsx,.xls,.csv,.txt,.md,.docx,image/*" hidden />
+              <button id="importRegulationsFile" class="secondaryButton" type="button">&#x30D5;&#x30A1;&#x30A4;&#x30EB;&#x304B;&#x3089;&#x53D6;&#x308A;&#x8FBC;&#x307F;</button>
+              <button id="saveRulesEditor" class="inlineAddButton" type="button">&#x4FDD;&#x5B58;</button>
+              <div class="viewModeToggle" role="group" aria-label="&#x8868;&#x793A;&#x5207;&#x66FF;">
+                <button class="viewModeButton" data-rulesview="table" type="button" title="&#x30C6;&#x30FC;&#x30D6;&#x30EB;&#x8868;&#x793A;" aria-label="&#x30C6;&#x30FC;&#x30D6;&#x30EB;&#x8868;&#x793A;">&#x2630;</button>
+                <button class="viewModeButton active" data-rulesview="editor" type="button" title="&#x30A8;&#x30C7;&#x30A3;&#x30BF;&#x8868;&#x793A;" aria-label="&#x30A8;&#x30C7;&#x30A3;&#x30BF;&#x8868;&#x793A;">&#x270E;</button>
+              </div>
+            </div></div>
+            <div class="tableWrap" id="rulesTableWrap" hidden><table class="dataTable rulesTable"><thead><tr><th>&#x5546;&#x54C1;</th><th>&#x7A2E;&#x5225;</th><th>NG / &#x30EB;&#x30FC;&#x30EB;</th><th>&#x4EE3;&#x66FF;&#x8868;&#x73FE;</th><th>&#x8AAC;&#x660E;</th><th></th></tr></thead><tbody class="tableAddBody"><tr><td colspan="6"><div class="addRowPanel" id="rulesAddPanel"></div></td></tr></tbody><tbody id="expressionRules"></tbody></table></div>
+            <div class="textEditorPanel" id="rulesEditorPanel">
+              <div class="textEditorControls">
+                <p class="textEditorHint">&#x300C;- NG: &#x30D1;&#x30BF;&#x30FC;&#x30F3; =&gt; &#x7F6E;&#x63DB; | &#x5099;&#x8003;&#x300D;&#x307E;&#x305F;&#x306F;&#x300C;- &#x6307;&#x5B9A;: &#x5185;&#x5BB9;&#x300D;&#x306E;&#x5F62;&#x5F0F;&#x3067;1&#x884C;1&#x30EB;&#x30FC;&#x30EB;&#x3067;&#x3059;&#x3002;&#x30D5;&#x30A1;&#x30A4;&#x30EB;&#x53D6;&#x308A;&#x8FBC;&#x307F;&#xFF08;PDF / Excel / Word / &#x30C6;&#x30AD;&#x30B9;&#x30C8; / &#x753B;&#x50CF;&#xFF09;&#x3067;&#x62BD;&#x51FA;&#x3057;&#x305F;&#x30EB;&#x30FC;&#x30EB;&#x306F;&#x81EA;&#x52D5;&#x4FDD;&#x5B58;&#x3055;&#x308C;&#x307E;&#x3059;&#x3002;&#x3053;&#x306E;&#x30A8;&#x30C7;&#x30A3;&#x30BF;&#x3067;&#x4FEE;&#x6B63;&#x3057;&#x305F;&#x5834;&#x5408;&#x306F;&#x300C;&#x4FDD;&#x5B58;&#x300D;&#x3092;&#x62BC;&#x3057;&#x3066;&#x304F;&#x3060;&#x3055;&#x3044;&#x3002;</p>
+              </div>
+              <textarea id="rulesEditorTextarea" class="textEditorArea" rows="18" spellcheck="false"></textarea>
+            </div>
+          </section>
+
+          <section class="viewPanel" data-panel="strategies">
+            <div class="viewHeader"><p class="viewDescription">&#x5546;&#x54C1;&#x30DE;&#x30B9;&#x30BF;&#x30FC;&#x30C7;&#x30FC;&#x30BF;&#x30D9;&#x30FC;&#x30B9;&#x306B;&#x7D10;&#x3065;&#x304F;&#x6226;&#x7565;&#x4EEE;&#x8AAC;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;1&#x5546;&#x54C1;&#x306B;&#x8907;&#x6570;&#x306E;戦略&#x3092;&#x4F5C;&#x6210;&#x3067;&#x304D;&#x307E;&#x3059;&#x3002</p><div class="viewHeaderActions">
+              <label class="viewHeaderCheckbox"><input id="showArchivedStrategies" type="checkbox" /> &#x30A2;&#x30FC;&#x30AB;&#x30A4;&#x30D6;&#x3092;&#x8868;&#x793A;</label>
+              <button id="runWhoWhat" class="inlineAddButton" type="button">戦略&#x751F;&#x6210;</button></div></div>
+            <div class="viewToggleRow">
+              <div class="viewToggle" role="group" aria-label="表示切替">
+                <button class="viewToggleItem active" type="button" data-summary-view="strategies" data-summary-mode="summary"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>サマリー</button>
+                <button class="viewToggleItem" type="button" data-summary-view="strategies" data-summary-mode="list"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M3.5 10h17"/><path d="M9.5 4.5v15"/></svg>テーブルのみ</button>
+              </div>
+            </div>
+            <div class="viewSummaryPanel" id="strategiesSummary"></div>
+            <div class="tableWrap"><table class="dataTable strategiesTable"><thead><tr><th>&#x5546;&#x54C1;</th><th>&#x6226;&#x7565;&#x30B3;&#x30F3;&#x30BB;&#x30D7;&#x30C8;</th><th>&#x6226;&#x7565;&#x672C;&#x6587;</th><th>&#x72B6;&#x614B;</th><th></th></tr></thead><tbody class="tableAddBody"><tr><td colspan="5"><div class="addRowPanel" id="strategiesAddPanel"></div></td></tr></tbody><tbody id="strategies"></tbody></table></div>
+          </section>
+
+          <section class="viewPanel" data-panel="banners">
+            <section class="subDbSection"><div class="subDbHeader"><div><h3>&#x30D0;&#x30CA;&#x30FC;&#x6848;DB</h3><p>&#x6848;&#x3092;&#x8FFD;&#x52A0;&#x3057;&#x3066;&#x300C;&#x753B;&#x50CF;&#x751F;&#x6210;&#x300D;&#x3092;&#x62BC;&#x3059;&#x3060;&#x3051;&#x3067;&#x3001;&#x30D7;&#x30ED;&#x30F3;&#x30D7;&#x30C8;&#x30FB;&#x5E83;&#x544A;&#x6587;&#x306E;&#x4F5C;&#x6210;&#x304B;&#x3089;&#x753B;&#x50CF;&#x5B8C;&#x6210;&#x307E;&#x3067;&#x81EA;&#x52D5;&#x3067;&#x5B9F;&#x884C;&#x3057;&#x307E;&#x3059;&#x3002;</p></div>
+                  <div class="subDbHeaderActions">
+                    <div class="bannerCardControls" id="bannerCardControls">
+                      <div class="segmentedControl" role="group" aria-label="&#x30AB;&#x30FC;&#x30C9;&#x30B5;&#x30A4;&#x30BA;">
+                        <button class="segmentButton" data-cardsize="small" type="button">&#x5C0F;</button>
+                        <button class="segmentButton" data-cardsize="medium" type="button">&#x4E2D;</button>
+                        <button class="segmentButton" data-cardsize="large" type="button">&#x5927;</button>
+                      </div>
+                      <button id="bannerCardTextModeToggle" class="toggleButton" type="button" aria-pressed="false">&#x753B;&#x50CF;&#x306E;&#x307F;</button>
+                    </div>
+                    <div class="bannerCardControls" id="bannerCompareSizeControls" hidden>
+                      <div class="segmentedControl" role="group" aria-label="&#x5217;&#x30B5;&#x30A4;&#x30BA;">
+                        <button class="segmentButton" data-comparesize="standard" type="button">&#x6A19;&#x6E96;</button>
+                        <button class="segmentButton" data-comparesize="xl" type="button">&#x7279;&#x5927;</button>
+                      </div>
+                    </div>
+                    <div class="viewModeToggle" role="group" aria-label="&#x8868;&#x793A;&#x5207;&#x66FF;">
+                      <button class="viewModeButton" data-bannerview="table" type="button" title="&#x30C6;&#x30FC;&#x30D6;&#x30EB;&#x8868;&#x793A;" aria-label="&#x30C6;&#x30FC;&#x30D6;&#x30EB;&#x8868;&#x793A;">&#x2630;</button>
+                      <button class="viewModeButton active" data-bannerview="cards" type="button" title="&#x30AB;&#x30FC;&#x30C9;&#x8868;&#x793A;" aria-label="&#x30AB;&#x30FC;&#x30C9;&#x8868;&#x793A;">&#x229E;</button>
+                      <button class="viewModeButton" data-bannerview="compare" type="button" title="&#x6BD4;&#x8F03;&#x8868;&#x793A;" aria-label="&#x6BD4;&#x8F03;&#x8868;&#x793A;"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2" y="5" width="8.5" height="14" rx="1.5"/><rect x="13.5" y="5" width="8.5" height="14" rx="1.5"/></svg></button>
+                    </div>
+                  </div>
+                </div>
+                <div class="viewToggleRow">
+                  <div class="viewToggle" role="group" aria-label="表示切替">
+                    <button class="viewToggleItem active" type="button" data-summary-view="banners" data-summary-mode="summary"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>サマリー</button>
+                    <button class="viewToggleItem" type="button" data-summary-view="banners" data-summary-mode="list"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="15" rx="1.5"/><path d="M3.5 10h17"/><path d="M9.5 4.5v15"/></svg>一覧のみ</button>
+                  </div>
+                </div>
+                <div class="viewSummaryPanel" id="bannersSummary"></div>
+                <div class="tableWrap wideTable" id="bannersTableWrap" hidden><table class="dataTable bannersTable"><thead><tr><th>タイトル</th><th>戦略</th><th>テンプレDB</th><th>テンプレ画像</th><th>制作状態</th><th>画像状態</th><th>生成画像</th><th>商品</th><th>商品画像</th><th>ロゴ</th><th>追加指示</th><th>画像テキスト</th><th>プロンプト</th><th>修正指示</th><th></th></tr></thead><tbody id="banners"></tbody></table></div>
+                <div class="bannerCardGrid" id="bannerCards"></div>
+                <div class="bannerCompareWrap" id="bannerCompareWrap" hidden>
+                  <div class="bannerCompareHeader"><span id="bannerCompareCount">&#x6BD4;&#x8F03;&#x5BFE;&#x8C61; 0&#x6848;</span></div>
+                  <div class="bannerCompareRow" id="bannerCompareRow"></div>
+                </div>
+              </section>
+          </section>
+
+          <section class="viewPanel" data-panel="adTemplates">
+            <div class="viewHeader">
+              <p class="viewDescription">&#x30D0;&#x30CA;&#x30FC;&#x5236;&#x4F5C;&#x306E;&#x4E2D;&#x306B;&#x9589;&#x3058;&#x305A;&#x3001;&#x6848;&#x4EF6;&#x5168;&#x4F53;&#x3067;&#x5171;&#x6709;&#x3059;&#x308B;&#x578B;&#x30FB;&#x53C2;&#x7167;&#x753B;&#x50CF;&#x30FB;&#x5B57;&#x30B3;&#x30F3;&#x30C6;&#x30FB;&#x6210;&#x529F;&#x8981;&#x56E0;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p>
+              <div class="viewHeaderActions">
+                <div class="viewModeToggle" role="group" aria-label="&#x30D0;&#x30CA;&#x30FC;&#x30C6;&#x30F3;&#x30D7;&#x30EC;&#x306E;&#x8868;&#x793A;&#x5207;&#x66FF;">
+                  <button class="viewModeButton" data-adtemplateview="table" type="button" aria-pressed="false">&#x30C6;&#x30FC;&#x30D6;&#x30EB;</button>
+                  <button class="viewModeButton active" data-adtemplateview="gallery" type="button" aria-pressed="true">&#x30AE;&#x30E3;&#x30E9;&#x30EA;&#x30FC;</button>
+                </div>
+              </div>
+            </div>
+            <div class="adTemplateAddArea" id="adTemplatesAddPanel"></div>
+            <div id="adTemplatesTableView" class="tableWrap"><table class="dataTable adTemplatesTable"><thead><tr><th>&#x30BF;&#x30A4;&#x30C8;&#x30EB;</th><th>&#x30C6;&#x30F3;&#x30D7;&#x30EC;&#x5316;&#x72B6;&#x614B;</th><th>&#x30D0;&#x30CA;&#x30FC;&#x753B;&#x50CF;</th><th>&#x30C6;&#x30F3;&#x30D7;&#x30EC;&#x5B57;&#x30B3;&#x30F3;&#x30C6;</th><th>&#x6210;&#x529F;&#x8981;&#x56E0;</th><th></th></tr></thead><tbody id="adTemplates"></tbody></table></div>
+            <div id="adTemplatesGallery" class="adTemplateGallery" role="list" aria-live="polite"></div>
+          </section>
+
+          <section class="viewPanel" data-panel="settings">
+            <div class="viewHeader"><p class="viewDescription">API&#x30AD;&#x30FC;&#x306A;&#x3069;&#x3001;CMO AI Lite&#x306E;&#x30ED;&#x30FC;&#x30AB;&#x30EB;&#x5B9F;&#x884C;&#x306B;&#x5FC5;&#x8981;&#x306A;&#x8A2D;&#x5B9A;&#x3092;&#x7BA1;&#x7406;&#x3057;&#x307E;&#x3059;&#x3002;</p></div>
+            <section class="settingsCard">
+              <div class="settingsCardHeader"><h3>OpenAI API&#x30AD;&#x30FC;</h3><span id="openAiStatus">&#x672A;&#x78BA;&#x8A8D;</span></div>
+              <p class="settingsNote">API&#x30AD;&#x30FC;&#x306F;&#x30ED;&#x30FC;&#x30AB;&#x30EB;&#x306E;&#x8A2D;&#x5B9A;&#x30B9;&#x30C8;&#x30A2;&#x306B;&#x4FDD;&#x5B58;&#x3057;&#x307E;&#x3059;&#x3002;&#x753B;&#x9762;&#x4E0A;&#x306B;&#x306F;&#x4FDD;&#x5B58;&#x6E08;&#x307F;&#x306E;&#x5024;&#x3092;&#x8868;&#x793A;&#x305B;&#x305A;&#x3001;&#x78BA;&#x8A8D;&#x7528;&#x306B;&#x30DE;&#x30B9;&#x30AF;&#x3057;&#x305F;&#x72B6;&#x614B;&#x3060;&#x3051;&#x3092;&#x8868;&#x793A;&#x3057;&#x307E;&#x3059;&#x3002;</p>
+              <div class="settingsInline"><label><span>API&#x30AD;&#x30FC;</span><input id="openAiKey" type="password" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" /></label><button id="saveOpenAiSettings" class="ghostButton" type="button">&#x4FDD;&#x5B58;</button></div>
+            </section>
+          </section>
+        </section>
+      </section>
+
+      <aside id="detailPane" class="detailPane" aria-hidden="true">
+        <div id="detailResizeHandle" class="detailResizeHandle" role="separator" aria-orientation="vertical"></div>
+        <header class="detailPaneHeader">
+          <div>
+            <span id="detailPaneKicker">&#x9078;&#x629E;</span>
+            <h2 id="detailPaneTitle">&#x672A;&#x9078;&#x629E;</h2>
+            <div id="detailPaneStatusRow" class="detailPaneStatusRow"></div>
+          </div>
+          <div class="detailPaneHeaderActions">
+            <button id="expandDetailPane" class="detailExpandButton" type="button" title="&#x8A73;&#x7D30;&#x3092;&#x62E1;&#x5927;&#x8868;&#x793A;"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H4a1 1 0 0 0-1 1v4"/><path d="M16 3h4a1 1 0 0 1 1 1v4"/><path d="M8 21H4a1 1 0 0 1-1-1v-4"/><path d="M16 21h4a1 1 0 0 0 1-1v-4"/></svg>&#x62E1;&#x5927;</button>
+            <button id="closeDetailPane" type="button" aria-label="&#x8A73;&#x7D30;&#x3092;&#x9589;&#x3058;&#x308B;">&#x00D7;</button>
+          </div>
+        </header>
+        <div id="detailQuickActions" class="detailQuickActions" hidden></div>
+        <div id="detailPanePreview" class="detailPanePreview" hidden></div>
+        <div id="detailPaneBody" class="detailPaneBody"></div>
+      </aside>
+      </div>
+
+    <div id="bannerAddModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="bannerAddTitle">
+      <div class="modalCard bannerAddModalCard">
+        <header class="modalHeader"><h2 id="bannerAddTitle">&#x30D0;&#x30CA;&#x30FC;&#x6848;&#x3092;&#x8FFD;&#x52A0;</h2><button id="closeBannerAddModal" type="button" aria-label="&#x9589;&#x3058;&#x308B;">&#x00D7;</button></header>
+        <div id="bannerAddModalBody" class="bannerAddModalBody"></div>
+        <footer class="modalFooter"><button id="cancelBannerAdd" class="secondaryButton" type="button">キャンセル</button><span id="bannerAddValidation" class="modalValidationMessage">戦略を選択してください</span><button id="addBannerAndGenerate" class="primaryActionButton" type="button">画像生成</button></footer>
+      </div>
+    </div>
+
+    <div id="bannerEditModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="bannerEditTitle">
+      <div class="modalCard bannerEditModalCard">
+        <header class="modalHeader"><h2 id="bannerEditTitle">&#x7BC4;&#x56F2;&#x6307;&#x5B9A;&#x4FEE;&#x6B63;</h2><button id="closeBannerEditModal" type="button" aria-label="&#x9589;&#x3058;&#x308B;">&#x00D7;</button></header>
+        <div class="bannerEditModalBody">
+          <p class="modalHint">&#x4FEE;&#x6B63;&#x3057;&#x305F;&#x3044;&#x7BC4;&#x56F2;&#x3092;&#x30C9;&#x30E9;&#x30C3;&#x30B0;&#x3057;&#x3066;&#x56DB;&#x89D2;&#x3067;&#x56F2;&#x307F;&#x3001;&#x7BC4;&#x56F2;&#x3054;&#x3068;&#x306B;&#x6307;&#x793A;&#x3092;&#x5165;&#x529B;&#x3057;&#x3066;&#x304F;&#x3060;&#x3055;&#x3044;&#x3002;&#x9078;&#x629E;&#x3057;&#x305F;&#x7BC4;&#x56F2;&#x3092;&#x307E;&#x3068;&#x3081;&#x3066;1&#x56DE;&#x3067;&#x4FEE;&#x6B63;&#x3057;&#x307E;&#x3059;&#x3002;</p>
+          <div id="bannerEditCanvasWrap" class="bannerEditCanvasWrap">
+            <canvas id="bannerEditImageCanvas"></canvas>
+            <canvas id="bannerEditSelectionCanvas"></canvas>
+          </div>
+          <div class="bannerEditControls">
+            <div class="bannerEditToolbar">
+              <button id="bannerEditClear" class="secondaryButton" type="button">&#x3059;&#x3079;&#x3066;&#x3084;&#x308A;&#x76F4;&#x3057;</button>
+            </div>
+            <div id="bannerEditSelectionCards" class="bannerEditSelectionCards" aria-live="polite"></div>
+            <div id="bannerEditStatus" class="bannerEditStatus" role="status" aria-live="polite"></div>
+          </div>
+        </div>
+        <footer class="modalFooter"><button id="cancelBannerEdit" class="secondaryButton" type="button">&#x30AD;&#x30E3;&#x30F3;&#x30BB;&#x30EB;</button><button id="runBannerEdit" class="inlineAddButton" type="button" disabled>&#x7BC4;&#x56F2;&#x6307;&#x5B9A;&#x4FEE;&#x6B63;&#x3092;&#x5B9F;&#x884C;</button></footer>
+      </div>
+    </div>
+
+    <div id="bannerFullEditModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="bannerFullEditTitle">
+      <div class="modalCard bannerFullEditModalCard">
+        <header class="modalHeader"><h2 id="bannerFullEditTitle">全体修正</h2><button id="closeBannerFullEdit" type="button" aria-label="全体修正を閉じる">&#x00D7;</button></header>
+        <div class="bannerFullEditModalBody">
+          <p class="modalHint">元画像全体に反映したい修正内容を入力してください。指定されていない要素はできるだけ維持します。</p>
+          <div class="bannerFullEditPreview"><img id="bannerFullEditImage" alt="全体修正する現在のバナー画像" /></div>
+          <label class="bannerFullEditField" for="bannerFullEditInstruction">
+            <span>全体の修正指示</span>
+            <textarea id="bannerFullEditInstruction" rows="5" maxlength="2000" placeholder="例: 全体を明るくし、より高級感のある配色に変える"></textarea>
+          </label>
+          <p id="bannerFullEditStatus" class="bannerEditStatus" role="status" aria-live="polite"></p>
+        </div>
+        <footer class="modalFooter"><button id="cancelBannerFullEdit" class="secondaryButton" type="button">キャンセル</button><button id="runBannerFullEdit" class="inlineAddButton" type="button" disabled>全体修正を実行</button></footer>
+      </div>
+    </div>
+
+    <div id="projectSwitcherModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="projectSwitcherTitle">
+      <div class="modalCard projectSwitcherCard">
+        <header><h2 id="projectSwitcherTitle">&#x6848;&#x4EF6;&#x3092;&#x5207;&#x308A;&#x66FF;&#x3048;</h2><button id="closeProjectSwitcher" type="button">&#x00D7;</button></header>
+        <div class="projectSwitcherTop">
+          <input id="projectSearch" type="search" placeholder="&#x6848;&#x4EF6;&#x540D;&#x30FB;&#x5546;&#x54C1;&#x540D;&#x3067;&#x691C;&#x7D22;" autocomplete="off" />
+          <button id="createProjectFromSwitcher" type="button">&#xFF0B; &#x65B0;&#x898F;&#x6848;&#x4EF6;</button>
+        </div>
+        <section class="projectListSection">
+          <h3>案件</h3>
+          <div id="allProjectsList" class="projectList"></div>
+        </section>
+        <details id="archivedProjectsSection" class="projectListSection archivedProjectsSection">
+          <summary>アーカイブ済み <span id="archivedProjectsCount">0</span></summary>
+          <div id="archivedProjectsList" class="projectList"></div>
+        </details>
+      </div>
+    </div>
+
+    <div id="projectModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+      <div class="modalCard">
+        <header><h2 id="projectModalTitle">新規案件（商品を登録）</h2><button id="closeProjectModal" type="button">&#x00D7;</button></header>
+        <label><span>商品名</span><input id="newProjectProductName" placeholder="例: 商品名を入力（そのまま案件名になります）" /></label>
+        <label><span>LP（商品ページのURL）</span><input id="newProjectProductUrl" placeholder="商品のLP or 公式サイトURL" /></label>
+        <label><span>簡易説明（任意）</span><textarea id="newProjectProductDesc" rows="3" placeholder="特徴、ターゲット、補足メモ"></textarea></label>
+        <p class="modalHint">1案件=1商品です。商品を登録すると案件が作成されます。画像・ロゴは作成後に「前提情報 &gt; 画像」、トンマナは「前提情報 &gt; 商品情報」で編集できます。</p>
+        <footer><button id="createProject" type="button">商品を登録して作成</button></footer>
+      </div>
+    </div>
+
+    <div id="detailModal" class="modalOverlay hidden" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+      <div class="modalCard detailModalCard">
+        <header><div><span id="detailModalKicker" class="modalKicker"></span><h2 id="detailModalTitle">&#x8A73;&#x7D30;</h2></div><button id="closeDetailModal" type="button">&#x00D7;</button></header>
+        <div id="detailModalBody" class="detailModalBody"></div>
+      </div>
+    </div>
+    </main>
+    <script type="module" src="/app.js?v=20260717-range-edit"></script>
+  </body>
+</html>

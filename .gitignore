@@ -1,0 +1,23 @@
+node_modules/
+.cache/
+.env
+.env.*
+!.env.example
+
+projects/*
+!projects/_template/
+!projects/_template/**
+
+*.log
+.DS_Store
+Thumbs.db
+local-secrets/
+tmp/
+.shot.tmp.mjs
+.superpowers/
+.codex-handoff.md
+.worktrees/
+
+# ユーザーがアップロードしたテンプレ参照画像(配布に含めない)
+data/ad-template-uploads/
+data/.runtime/

@@ -1,0 +1,119 @@
+{
+  "version": "2.0",
+  "copySlotPlan": {
+    "templateId": "tpl_eval",
+    "slots": [
+      {
+        "slotId": "hook",
+        "role": "headline",
+        "messageRole": "hook",
+        "canonicalField": "mainHook",
+        "charBudget": 5,
+        "required": true
+      },
+      {
+        "slotId": "offer",
+        "role": "offer",
+        "messageRole": "offer",
+        "canonicalField": "offerBadge",
+        "charBudget": 8,
+        "required": false
+      }
+    ]
+  },
+  "generationContract": {
+    "strategyWhat": {
+      "strategyId": "str_eval",
+      "markdown": "正しい訴求"
+    },
+    "templateHow": {
+      "templateId": "tpl_eval"
+    },
+    "sourceTracePolicy": {
+      "requireStrategySourceForClaims": true,
+      "requireTemplateSourceForHow": true
+    }
+  },
+  "hardGateCases": [
+    {
+      "id": "missing-required-slot",
+      "expectedPassed": false,
+      "brief": { "appealAxis": "課題", "whyItStops": "具体的だから", "slotTexts": [] }
+    },
+    {
+      "id": "missing-appeal-axis",
+      "expectedPassed": false,
+      "brief": {
+        "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "missing-stop-reason",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "over-char-budget",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求です長すぎる", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "missing-strategy-source",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "wrong-strategy-id",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_wrong", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "strategy-text-mismatch",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "存在しない根拠" }, "templateHowSource": { "templateId": "tpl_eval" } }]
+      }
+    },
+    {
+      "id": "missing-template-source",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" } }]
+      }
+    },
+    {
+      "id": "wrong-template-id",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [{ "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_wrong" } }]
+      }
+    },
+    {
+      "id": "unsupported-offer-claim",
+      "expectedPassed": false,
+      "brief": {
+        "appealAxis": "課題", "whyItStops": "具体的だから",
+        "slotTexts": [
+          { "slotId": "hook", "role": "headline", "text": "正しい訴求", "strategySource": { "strategyId": "str_eval", "sourceText": "正しい訴求" }, "templateHowSource": { "templateId": "tpl_eval" } },
+          { "slotId": "offer", "role": "offer", "text": "初月無料", "templateHowSource": { "templateId": "tpl_eval" } }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "cmo-ai-lite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "fixtures:regulations": "node tests/fixtures/generate-regulation-excel-fixtures.js",
+    "dev": "node --watch src/server.js",
+    "actions": "node src/cli.js actions:list",
+    "project:create": "node src/cli.js project:create",
+    "project:validate": "node src/cli.js project:validate",
+    "run": "node src/cli.js run",
+    "templates:sanitize-bundled": "node scripts/sanitize-bundled-ad-templates.mjs",
+    "start": "node src/server.js",
+    "postinstall": "node scripts/postinstall-browser.mjs",
+    "setup-browser": "node scripts/postinstall-browser.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@puppeteer/browsers": "^2.13.2",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "puppeteer-core": "^24.11.2",
+    "tesseract.js": "^7.0.0",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1.0.0",
+  "projectName": "",
+  "status": "draft",
+  "createdAt": "",
+  "updatedAt": "",
+  "client": {
+    "name": "",
+    "contact": "",
+    "industry": ""
+  },
+  "product": {
+    "name": "",
+    "officialUrl": "",
+    "category": "",
+    "price": "",
+    "offer": "",
+    "constraints": []
+  },
+  "objective": {
+    "primaryGoal": "",
+    "conversionPoint": "",
+    "targetChannel": "",
+    "successMetric": ""
+  },
+  "workflow": {
+    "currentPhase": "案件準備",
+    "recommendedNextActions": [
+      "project.resolve_context",
+      "research.extract_facts"
+    ]
+  },
+  "productName": "",
+  "officialUrl": ""
+}
