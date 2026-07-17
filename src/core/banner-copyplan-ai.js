@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { openAiJson } from "./openai-text.js";
+import { anthropicJson } from "./anthropic-text.js";
 import { loadPrompt } from "./prompt-files.js";
 import { classifyExpressionRules, prepareBannerGenerationContext } from "./banner-ai.js";
 import { buildInstructionPolicy } from "./banner-instruction-policy.js";
@@ -15,10 +15,10 @@ import { buildTemplateCopyInput } from "./banner-copy-ai.js";
 import { hashCopyBrief } from "./banner-copy-hash.js";
 import { checkCopyGate } from "./banner-copy-gate.js";
 
-const DEFAULT_TEXT_MODEL = process.env.CMOAI_TEXT_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
+const DEFAULT_TEXT_MODEL = process.env.CMOAI_BANNER_COPY_MODEL || process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 const BANNER_COPYPLAN_SYSTEM = loadPrompt("banner-copy");
-const REASONING_EFFORT = process.env.CMOAI_TEXT_REASONING_EFFORT || "medium";
-const COPYPLAN_TIMEOUT_MS = Number(process.env.CMOAI_COPYPLAN_TIMEOUT_MS) || 120000;
+const REASONING_EFFORT = process.env.CMOAI_BANNER_COPY_EFFORT || process.env.ANTHROPIC_EFFORT || "high";
+const COPYPLAN_TIMEOUT_MS = Number(process.env.CMOAI_BANNER_COPY_TIMEOUT_MS || process.env.ANTHROPIC_TIMEOUT_MS) || 120000;
 
 export async function generateBannerCopyPlan({
   banners,
@@ -31,7 +31,8 @@ export async function generateBannerCopyPlan({
   generationRunId: requestedGenerationRunId = "",
   candidateGroupId: requestedCandidateGroupId = "",
   candidateIndexes = [],
-  jsonGenerator = openAiJson
+  baselineSeed = null,
+  jsonGenerator = anthropicJson
 } = {}) {
   const targets = Array.isArray(banners) ? banners.filter(Boolean) : [];
   if (!targets.length) throw new Error("コピー開発対象のバナー案がありません。");
@@ -61,6 +62,8 @@ export async function generateBannerCopyPlan({
     instructionPolicy,
     approvedClaimSnapshot: snapshot,
     count: targets.length,
+    candidateIndexes: stableCandidateIndexes,
+    baselineSeed: normalizeBaselineSeed(baselineSeed),
     categoryRelation
   });
 
@@ -74,7 +77,11 @@ export async function generateBannerCopyPlan({
         reasoningEffort: REASONING_EFFORT,
         timeoutMs: COPYPLAN_TIMEOUT_MS
       });
-      validateBatchResponse(response, targets.length);
+      validateBatchResponse(response, {
+        expectedCount: targets.length,
+        candidateIndexes: stableCandidateIndexes,
+        baselineSeed
+      });
       parsed = response;
       break;
     } catch (error) {
@@ -191,6 +198,8 @@ function buildCopyplanUserPrompt({
   instructionPolicy,
   approvedClaimSnapshot,
   count,
+  candidateIndexes,
+  baselineSeed,
   categoryRelation
 }) {
   const slotLimits = (copySlotPlan.slots || []).map((slot) => ({
@@ -211,7 +220,9 @@ function buildCopyplanUserPrompt({
     instructionPolicy,
     approvedClaimSnapshot,
     categoryRelation,
-    count
+    count,
+    candidateIndexes,
+    baselineSeed
   }, null, 2);
 }
 
@@ -236,10 +247,10 @@ function buildCopyplanHypothesis(raw, { strategyId, approvedClaimSnapshot, gener
       motif: clean(source.visualIntent?.motif)
     },
     semanticGroupPlan: [],
-    templateFitDecision: { status: "adapt", reason: "copyplan_v6", roleAdjustments: [] },
-    variationPolicy: { changedDimensions: ["angle"], preservedDimensions: ["promise"] },
+    templateFitDecision: { status: "adapt", reason: "copyplan_v7", roleAdjustments: [] },
+    variationPolicy: { changedDimensions: ["hook", "supportingProof", "ctaTone"], preservedDimensions: ["primaryPromise", "templateStructure"] },
     additionalInstructionIntent: {},
-    origin: "copyplan_v6"
+    origin: "copyplan_v7"
   };
   const contentHash = hashObject(base);
   return {
@@ -264,6 +275,7 @@ function buildCopyBriefFromCandidate(candidate, {
   const source = candidate && typeof candidate === "object" ? candidate : {};
   const slotTexts = normalizeSlotTexts(source.slotTexts || [], copySlotPlan);
   const canonical = syncCanonicalFieldsFromSlots(slotTexts);
+  const variationRole = normalizeVariationRole(source.variationRole, candidateIndex);
   const brief = {
     version: 4,
     strategyId: clean(strategyId),
@@ -274,6 +286,9 @@ function buildCopyBriefFromCandidate(candidate, {
     generatedAt: new Date().toISOString(),
     model: DEFAULT_TEXT_MODEL,
     appealAxis: clean(source.appealAxis || source.angle || hypothesis.chosenAngle),
+    variationRole,
+    baselineReference: normalizeBaselineReference(source.baselineReference, candidateIndex),
+    variationDirection: clean(source.variationDirection || source.angle || source.appealAxis),
     whyItStops: clean(source.whyItStops),
     targetMoment: clean(hypothesis.targetMoment),
     mainHook: canonical.mainHook || "",
@@ -296,17 +311,54 @@ function buildCopyBriefFromCandidate(candidate, {
   return brief;
 }
 
-function validateBatchResponse(parsed, expectedCount) {
+function validateBatchResponse(parsed, {
+  expectedCount,
+  candidateIndexes = [],
+  baselineSeed = null
+} = {}) {
   if (!parsed || typeof parsed !== "object") throw invalidBatch("応答がオブジェクトではありません。");
   if (!parsed.hypothesis || typeof parsed.hypothesis !== "object") throw invalidBatch("hypothesisがありません。");
   const candidates = Array.isArray(parsed.candidates) ? parsed.candidates : [];
   if (candidates.length < expectedCount) throw invalidBatch("candidates件数が不足しています。");
-  const angles = candidates.slice(0, expectedCount).map((c) => clean(c?.angle));
-  if (angles.some((angle) => !angle)) throw invalidBatch("angleが不足しています。");
-  if (new Set(angles).size !== angles.length) throw invalidBatch("angleが重複しています。");
-  const selectedCandidates = candidates.slice(0, expectedCount);
+  const requestedCandidateIndexes = Array.isArray(candidateIndexes) && candidateIndexes.length
+    ? candidateIndexes.map((candidateIndex) => Number(candidateIndex))
+    : Array.from({ length: expectedCount }, (_, index) => index);
+  const candidateMap = new Map(candidates.map((candidate) => [Number(candidate?.candidateIndex), candidate]));
+  const selectedCandidates = requestedCandidateIndexes.map((candidateIndex) => candidateMap.get(candidateIndex)).filter(Boolean);
+  if (selectedCandidates.length < expectedCount) {
+    throw invalidBatch("要求されたcandidateIndexが不足しています。");
+  }
+  const selectedCandidateIndexes = selectedCandidates.map((candidate) => Number(candidate?.candidateIndex));
+  if (selectedCandidateIndexes.some((candidateIndex) => !Number.isInteger(candidateIndex))) {
+    throw invalidBatch("candidateIndexが不足しています。");
+  }
+  if (new Set(selectedCandidateIndexes).size !== selectedCandidateIndexes.length) {
+    throw invalidBatch("candidateIndexが重複しています。");
+  }
+  const baseline = selectedCandidates.find((candidate) => Number(candidate?.candidateIndex) === 0) || normalizeBaselineSeed(baselineSeed);
+  if (!baseline) throw invalidBatch("candidateIndex=0 のbaseline案がありません。");
+  if (Number(baseline?.candidateIndex || 0) === 0 && normalizeVariationRole(baseline?.variationRole, 0) !== "baseline") {
+    throw invalidBatch("baseline案のvariationRoleが不正です。");
+  }
+  const baselineSignature = slotTextSignature(baseline);
   if (selectedCandidates.some((candidate) => !clean(candidate?.whyItStops))) {
     throw invalidBatch("whyItStopsが不足しています。");
+  }
+  for (const candidate of selectedCandidates) {
+    const candidateIndex = Number(candidate?.candidateIndex);
+    if (!Array.isArray(candidate?.slotTexts) || !candidate.slotTexts.length) {
+      throw invalidBatch(`candidateIndex=${candidateIndex} のslotTextsが不足しています。`);
+    }
+    if (candidateIndex === 0) continue;
+    if (normalizeBaselineReference(candidate?.baselineReference, candidateIndex) !== 0) {
+      throw invalidBatch(`candidateIndex=${candidateIndex} のbaselineReferenceは0を参照してください。`);
+    }
+    if (!clean(candidate?.variationDirection || candidate?.angle || candidate?.appealAxis)) {
+      throw invalidBatch(`candidateIndex=${candidateIndex} のvariationDirectionが不足しています。`);
+    }
+    if (slotTextSignature(candidate) === baselineSignature) {
+      throw invalidBatch(`candidateIndex=${candidateIndex} がbaselineと同一コピーです。`);
+    }
   }
 }
 
@@ -360,4 +412,40 @@ function stableStringify(value) {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function normalizeVariationRole(value, candidateIndex) {
+  const normalized = clean(value).toLowerCase();
+  if (normalized === "baseline" || normalized === "base") return "baseline";
+  if (normalized === "variant" || normalized === "variation") return "variant";
+  return Number(candidateIndex) === 0 ? "baseline" : "variant";
+}
+
+function normalizeBaselineReference(value, candidateIndex) {
+  if (Number(candidateIndex) === 0) return 0;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : 0;
+}
+
+function slotTextSignature(candidate) {
+  const items = Array.isArray(candidate?.slotTexts) ? candidate.slotTexts : [];
+  return stableStringify(items.map((slot) => ({
+    slotId: clean(slot?.slotId),
+    text: clean(slot?.text)
+  })).sort((left, right) => left.slotId.localeCompare(right.slotId)));
+}
+
+function normalizeBaselineSeed(value) {
+  if (!value || typeof value !== "object") return null;
+  const slotTexts = Array.isArray(value.slotTexts)
+    ? value.slotTexts
+    : (Array.isArray(value.copyBrief?.slotTexts) ? value.copyBrief.slotTexts : []);
+  if (!slotTexts.length) return null;
+  return {
+    candidateIndex: Number.isInteger(value.candidateIndex) ? value.candidateIndex : 0,
+    variationRole: normalizeVariationRole(value.variationRole, 0),
+    slotTexts,
+    appealAxis: clean(value.appealAxis || value.copyBrief?.appealAxis),
+    whyItStops: clean(value.whyItStops || value.copyBrief?.whyItStops)
+  };
 }

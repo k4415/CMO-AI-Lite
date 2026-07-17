@@ -62,8 +62,12 @@ CMO AI Lite
 ## 5. STEP3 バナー制作
 
 入力: 選択WHO-WHAT、広告テンプレ、表現レギュレーション、追加指示
-処理: copyBrief → promptJson → gpt-image-2
+処理: copyBrief(Anthropic Claude Opus 4.8) → promptJson(OpenAI 系) → gpt-image-2
 出力: バナー画像
+
+- copyBrief の第1案はテンプレ文面構造ベースの baseline。
+- 第2案以降は baseline を保った variation。
+- 事実DBはここで再読込しない。
 
 ## 6. 共通テンプレート
 

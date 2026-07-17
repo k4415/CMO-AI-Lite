@@ -10,7 +10,12 @@ import { addStrategy, deleteStrategy, updateStrategy } from "./core/strategy-sto
 import { extractTextFromFile } from "./core/file-import.js";
 import { addBannerCreative, claimBannerImageEdit, claimBannerImageGeneration, claimBannerPromptGeneration, completeBannerPromptOperation, deleteBannerCreative, ensureBannerCopyBriefsForPromptJobs, failBannerImageEdit, failBannerImageGeneration, failBannerPromptGeneration, generateBannerPromptBatch, listBannerCreatives, reconcileBannerPipeline, releaseBannerPromptGeneration, renewBannerImageGenerationLease, renewBannerPromptGenerationLease, reviseBannerCreative, spreadBannerIdeas, startBannerImageGeneration, updateBannerCreative } from "./core/banner-store.js";
 import { buildCompositeEditInstruction, normalizeEditRegionsFromBody, validateEditRegions } from "./core/banner-range-edit.js";
-import { getOpenAiSettingsStatus, saveOpenAiKey } from "./core/settings-store.js";
+import {
+  getAnthropicSettingsStatus,
+  getOpenAiSettingsStatus,
+  saveAnthropicKey,
+  saveOpenAiKey
+} from "./core/settings-store.js";
 import { addAdTemplate, deleteAdTemplate, getAdTemplateStatuses, recoverTemplateAnalysisJobs, updateAdTemplate } from "./core/ad-template-store.js";
 import { editBannerImageWithGptImage2, generateBannerImageWithGptImage2, normalizeBannerEditMode } from "./core/openai-image.js";
 import { generateWhoWhatProposals } from "./core/who-what-ai.js";
@@ -430,6 +435,15 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/settings/openai" && req.method === "POST") {
       const body = await readJsonBody(req);
       return sendJson(res, { ok: true, settings: await saveOpenAiKey(body.apiKey || "") });
+    }
+
+    if (url.pathname === "/api/settings/anthropic" && req.method === "GET") {
+      return sendJson(res, { ok: true, settings: await getAnthropicSettingsStatus() });
+    }
+
+    if (url.pathname === "/api/settings/anthropic" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return sendJson(res, { ok: true, settings: await saveAnthropicKey(body.apiKey || "") });
     }
 
     if (url.pathname === "/api/projects" && req.method === "POST") {

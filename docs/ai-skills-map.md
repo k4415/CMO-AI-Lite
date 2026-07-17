@@ -20,7 +20,7 @@ CMO AI Lite では、4つのエージェントスキルと AI モジュールで
 | --- | --- | --- |
 | スキル一覧 | `.claude/skills/` / `.agents/skills/` | Claude Code / Codex が読む定型ワークフロー（4スキル） |
 | システムプロンプト | `config/prompts/*.md` | AI実行の単一ソース |
-| AI実行モジュール | `src/core/*ai.js` | OpenAI APIを使う実行本体 |
+| AI実行モジュール | `src/core/*ai.js`, `src/core/anthropic-text.js`, `src/core/openai-image.js` | プロバイダ別のAI実行本体 |
 | DB保存/更新 | `src/core/*store.js` | ローカルJSON DBの読み書き |
 | 案件データ | `projects/{案件}/data/*.json` | 商品、事実、WHO-WHAT、バナー案 |
 
@@ -30,7 +30,7 @@ CMO AI Lite では、4つのエージェントスキルと AI モジュールで
 | --- | --- | --- |
 | `cmoai-research` | `product-research-ai.js`, `lp-vision-ai.js` | 内部LP解析 → 事実DB |
 | `cmoai-who-what` | `who-what-ai.js` | 事実DB → WHO-WHAT |
-| `cmoai-banner` | `banner-ai.js`, `openai-image.js` | WHO-WHAT → copyBrief → gpt-image-2 |
+| `cmoai-banner` | `banner-copyplan-ai.js`, `banner-ai.js`, `anthropic-text.js`, `openai-image.js` | WHO-WHAT → copyBrief → gpt-image-2 |
 | `cmoai-template` | `template-ai.js` | バナー画像テンプレ化 |
 
 ## WHO-WHAT入力DB
@@ -49,6 +49,12 @@ CMO AI Lite では、4つのエージェントスキルと AI モジュールで
 - 追加指示
 
 **事実DBはバナー生成では読まない。**
+
+バナー制作の provider 境界:
+
+- Stage 1 `copyBrief` = Anthropic (`claude-opus-4-8`)
+- Stage 2 `promptJson` = OpenAI 系
+- Stage 3 画像生成 = `gpt-image-2`
 
 ## エージェント連携
 

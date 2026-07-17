@@ -247,6 +247,7 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
       const preflight = await prepareCopyplanGroupContext(projectRoot, group.items, { product, strategy, template });
       errors.push(...preflight.errors);
       if (!preflight.items.length) return;
+      const baselineSeed = findBaselineSeedForCopyGroup(group.items, options.allBanners || []);
       const generated = await copyBriefGenerator({
         banners: preflight.items.map((item) => item.banner),
         product,
@@ -257,7 +258,8 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
         approvedClaimSnapshot: preflight.approvedClaimSnapshot,
         generationRunId: preflight.generationRunId,
         candidateGroupId: preflight.candidateGroupId,
-        candidateIndexes: preflight.candidateIndexes
+        candidateIndexes: preflight.candidateIndexes,
+        baselineSeed
       });
       const copyCompletedAt = new Date().toISOString();
       const copyDurationMs = Date.now() - copyStartMs;
@@ -381,6 +383,29 @@ async function prepareCopyplanGroupContext(projectRoot, items, { product, strate
 
 async function prepareHypothesisContractsForGroup(projectRoot, items, context) {
   return prepareCopyplanGroupContext(projectRoot, items, context);
+}
+
+function findBaselineSeedForCopyGroup(items, allBanners = []) {
+  const targets = Array.isArray(items) ? items : [];
+  if (!targets.length) return null;
+  if (targets.some((item) => Number(item?.banner?.candidateIndex) === 0)) return null;
+  const candidateGroupId = uniqueNonEmpty(targets.map((item) => item?.banner?.candidateGroupId))[0];
+  if (!candidateGroupId) return null;
+  const baseline = (Array.isArray(allBanners) ? allBanners : []).find((banner) => (
+    banner
+    && banner.candidateGroupId === candidateGroupId
+    && Number(banner.candidateIndex) === 0
+    && Array.isArray(banner.copyBrief?.slotTexts)
+    && banner.copyBrief.slotTexts.length
+  ));
+  if (!baseline) return null;
+  return {
+    candidateIndex: 0,
+    variationRole: "baseline",
+    slotTexts: baseline.copyBrief.slotTexts,
+    appealAxis: baseline.copyBrief.appealAxis || "",
+    whyItStops: baseline.copyBrief.whyItStops || ""
+  };
 }
 
 const IDENTITY_STAMP_KEYS = new Set([

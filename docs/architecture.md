@@ -43,12 +43,13 @@ Claude Code / Codex
 
 ```text
 Preflight (creativeHypothesis)
-  -> Stage 1 コピー開発 (copyBrief)
-  -> Stage 2 デザイン化 (promptJson / promptText)
-  -> Stage 3 画像生成 (gpt-image-2)
+  -> Stage 1 コピー開発 (copyBrief / Anthropic Claude Opus 4.8)
+  -> Stage 2 デザイン化 (promptJson / promptText / OpenAI 系)
+  -> Stage 3 画像生成 (gpt-image-2 / OpenAI)
 ```
 
 Stage 1 は選択されたWHO-WHATの範囲だけでコピーを開発する。事実DBは読まない。
+第1案はテンプレ文面構造ベースの baseline、第2案以降は baseline variation として作る。
 
 Stage 2 は copyBrief の文言を変更せず、slotId対応で画像生成プロンプト化する。
 

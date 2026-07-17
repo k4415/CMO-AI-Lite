@@ -22,7 +22,7 @@
 - システムプロンプトの正は `config/prompts/*.md`(単一ソース)。エージェントが独自にプロンプトを組んで直接ファイルを書くことは禁止。
 - AI実行には2つのモードがある。
   - **サブスク実行モード(エージェントの既定)**: `config/prompts/*.md` を読み、該当AIモジュールの `build*Prompt` と同じ入力を自分で集めて、Claude Code / Codex 自身のモデルで同じ出力JSONスキーマを作る。結果は既存のCRUD APIで保存し、テキストは保存前に `POST /api/regulations/apply` でNG表現を置換する。
-  - **API実行モード**: サーバー側の生成API(`*/generate*`, `*/extract-ai` など)を使う。UIからの操作は常にこちら。
+  - **API実行モード**: サーバー側の生成API(`*/generate*`, `*/extract-ai` など)を使う。UIからの操作は常にこちら。バナー制作では Stage 1 copyplan が Anthropic (`claude-opus-4-8`)、Stage 2 と画像生成が OpenAI 系。
 - 画像生成は常に `POST /api/banners/generate-image`(`gpt-image-2` 固定、OpenAI課金)。
 
 ## エージェントスキル（4体）
@@ -66,6 +66,12 @@ npm run dev   # http://localhost:5173
 curl -s -X POST localhost:5173/api/projects -H "content-type: application/json" \
   -d '{"projectName":"案件名","productName":"商品名","productUrl":"https://..."}'
 
+# APIキー設定
+GET  /api/settings/openai
+POST /api/settings/openai       {"apiKey":"sk-..."}
+GET  /api/settings/anthropic
+POST /api/settings/anthropic    {"apiKey":"sk-ant-..."}
+
 # 商品 / 内部LP解析 / 事実
 POST /api/research/products            {"project":"...","name":"...","officialUrl":"..."}
 POST /api/research/materials/extract   {"project":"...","materialId":"..."}
@@ -100,7 +106,7 @@ POST /api/ad-templates/template-image  {"project":"...","templateId":"..."}
 
 サブスク実行モードでバナーを作る場合、生成素材は**選択WHO-WHAT・広告テンプレ・追加指示原文**に限定する。**事実DBは読まない。**
 
-Preflight → Stage 1(copyBrief) → Stage 2(promptJson) → 画像生成(gpt-image-2) の順。詳細は `.claude/skills/cmoai-banner/SKILL.md` を参照。
+Preflight → Stage 1(copyBrief / Anthropic) → Stage 2(promptJson / OpenAI) → 画像生成(gpt-image-2 / OpenAI) の順。詳細は `.claude/skills/cmoai-banner/SKILL.md` を参照。
 
 追加指示は表現レギュレーションより優先する。
 

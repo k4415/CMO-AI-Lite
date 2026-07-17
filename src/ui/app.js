@@ -37,10 +37,11 @@ function emptyResearchWorkspace() {
   return { products: [], materials: [], facts: [], expressionRules: [], extractionJobs: [], strategies: [], banners: [], adTemplates: [] };
 }
 
-// オンボーディングガイド(はじめにカード)。OpenAI設定状況はサーバー確認が
+// オンボーディングガイド(はじめにカード)。API設定状況はサーバー確認が
 // 必要なため null(未確認)/true/false を保持し、settings取得後に反映する。
 const ONBOARDING_DISMISSED_KEY = "cmoai.onboardingDismissed";
 let openAiConfigured = null;
+let anthropicConfigured = null;
 
 const projectSelect = $("#projectSelect");
 const sidebarCollapsed = localStorage.getItem("cmoai:sidebarCollapsed") === "1" || window.matchMedia("(max-width: 820px)").matches;
@@ -231,6 +232,7 @@ on("#runWhoWhat", "click", (event) => runWhoWhat(event.currentTarget));
 on("#showArchivedStrategies", "change", () => { showArchivedStrategies = Boolean($("#showArchivedStrategies")?.checked); renderStrategies(); });
 on("#bannerCardTextModeToggle", "click", toggleBannerCardTextMode);
 on("#saveOpenAiSettings", "click", saveOpenAiSettings);
+on("#saveAnthropicSettings", "click", saveAnthropicSettings);
 on("#focusBanners", "click", () => switchView("banners"));
 on("#clearSelection", "click", () => selectItem(null, null));
 initDetailResize();
@@ -278,7 +280,7 @@ async function refreshAll() {
   try {
     await loadProjects();
     await refreshProjectData();
-    await loadOpenAiSettings();
+    await loadApiSettings();
     writeTerminal("system", "\u30ef\u30fc\u30af\u30b9\u30da\u30fc\u30b9\u3092\u8aad\u307f\u8fbc\u307f\u307e\u3057\u305f\u3002");
   } catch (error) {
     writeTerminal("error", `\u8aad\u307f\u8fbc\u307f\u306b\u5931\u6557\u3057\u307e\u3057\u305f: ${error.message}`);
@@ -399,21 +401,58 @@ async function loadResearch() {
   research = data.workspace;
 }
 
-async function loadOpenAiSettings() {
+async function loadApiSettings() {
+  await Promise.all([
+    loadOpenAiSettings({ skipRender: true }),
+    loadAnthropicSettings({ skipRender: true })
+  ]);
+  updateSidebarStatusCard();
+  renderOnboardingCard();
+}
+
+async function loadOpenAiSettings({ skipRender = false } = {}) {
   const status = $("#openAiStatus");
   const data = await get("/api/settings/openai").catch(() => null);
   if (status) status.textContent = data?.ok ? (data.settings.configured ? "\u8a2d\u5b9a\u6e08\u307f: " + data.settings.maskedKey : "\u672a\u8a2d\u5b9a") : "\u672a\u78ba\u8a8d";
   openAiConfigured = data?.ok ? Boolean(data.settings.configured) : null;
-  updateSidebarStatusCard(openAiConfigured);
-  renderOnboardingCard();
+  if (!skipRender) {
+    updateSidebarStatusCard();
+    renderOnboardingCard();
+  }
 }
 
-function updateSidebarStatusCard(configured) {
+async function loadAnthropicSettings({ skipRender = false } = {}) {
+  const status = $("#anthropicStatus");
+  const data = await get("/api/settings/anthropic").catch(() => null);
+  if (status) status.textContent = data?.ok ? (data.settings.configured ? "\u8a2d\u5b9a\u6e08\u307f: " + data.settings.maskedKey : "\u672a\u8a2d\u5b9a") : "\u672a\u78ba\u8a8d";
+  anthropicConfigured = data?.ok ? Boolean(data.settings.configured) : null;
+  if (!skipRender) {
+    updateSidebarStatusCard();
+    renderOnboardingCard();
+  }
+}
+
+function updateSidebarStatusCard() {
   const dot = $("#sidebarStatusDot");
   const text = $("#sidebarStatusText");
   if (!dot || !text) return;
-  dot.classList.toggle("isOnline", Boolean(configured));
-  text.textContent = configured === null ? "\u672a\u78ba\u8a8d" : configured ? "OpenAI\u63a5\u7d9a\u6e08\u307f" : "API\u30ad\u30fc\u672a\u8a2d\u5b9a";
+  const openAiReady = openAiConfigured === true;
+  const anthropicReady = anthropicConfigured === true;
+  const anyUnknown = openAiConfigured === null || anthropicConfigured === null;
+  dot.classList.toggle("isOnline", openAiReady && anthropicReady);
+  if (anyUnknown && !openAiReady && !anthropicReady) {
+    text.textContent = "\u672a\u78ba\u8a8d";
+    return;
+  }
+  if (openAiReady && anthropicReady) {
+    text.textContent = "OpenAI / Anthropic \u8a2d\u5b9a\u6e08\u307f";
+    return;
+  }
+  if (!openAiReady && !anthropicReady) {
+    text.textContent = "API\u30ad\u30fc\u672a\u8a2d\u5b9a";
+    return;
+  }
+  text.textContent = openAiReady ? "Anthropic\u672a\u8a2d\u5b9a" : "OpenAI\u672a\u8a2d\u5b9a";
 }
 
 function projectInitials(name) {
@@ -1069,7 +1108,7 @@ function homePipelineCard({ workspace, kicker, title, stats, empty, ring }) {
   return card;
 }
 
-// はじめにカード(オンボーディングガイド)。フェーズ3でOpenAI APIキー案内のみに
+// はじめにカード(オンボーディングガイド)。フェーズ3でAPIキー案内中心に
 // 縮小し、3ステップ判定(getOnboardingSteps)は廃止。案件作成後の導線は
 // #homeNextAction 側の「はじめてのバナーまで」20分ガイドレールに統合した。
 // 案件が1つもない/未選択のときは #homeOnboardingWrap 自体を中央大サイズに切り替え、
@@ -1103,22 +1142,36 @@ function onboardingAgentSectionHtml(collapsed) {
 
 // APIキー案内行のみのHTML。設定済みなら1行の確認表示、未設定なら
 // タイトル+ヒント+「設定を開く」ボタンを出す。
-function onboardingApiKeyRowHtml() {
-  const configured = openAiConfigured === true;
+function onboardingApiKeyRowHtml({ configured, title, hint }) {
   if (configured) {
     return '<div class="onboardingApiKeyRow isDone">'
       + '<span class="onboardingStepIcon">' + onboardingStepIconHtml(true) + '</span>'
-      + '<p class="onboardingApiKeyText">OpenAI APIキーは設定済みです。</p>'
+      + '<p class="onboardingApiKeyText">' + escapeHtml(title) + 'は設定済みです。</p>'
       + '</div>';
   }
   return '<div class="onboardingApiKeyRow">'
     + '<span class="onboardingStepIcon">' + onboardingStepIconHtml(false) + '</span>'
     + '<div class="onboardingStepBody">'
-    + '<p class="onboardingStepTitle">OpenAI APIキーを設定</p>'
-    + '<p class="onboardingStepHint">UIからのAI実行と画像生成に使います。キーはローカルにのみ保存されます。</p>'
+    + '<p class="onboardingStepTitle">' + escapeHtml(title) + 'を設定</p>'
+    + '<p class="onboardingStepHint">' + escapeHtml(hint) + '</p>'
     + '</div>'
     + '<button type="button" class="secondaryButton onboardingStepAction" data-onboarding-action="apiKey">設定を開く</button>'
     + '</div>';
+}
+
+function onboardingApiKeyRowsHtml() {
+  return [
+    onboardingApiKeyRowHtml({
+      configured: openAiConfigured === true,
+      title: "OpenAI APIキー",
+      hint: "リサーチ、WHO-WHAT、Stage 2、gpt-image-2 に使います。キーはローカルにのみ保存されます。"
+    }),
+    onboardingApiKeyRowHtml({
+      configured: anthropicConfigured === true,
+      title: "Anthropic APIキー",
+      hint: "バナーのコピー案生成(Stage 1 / copyBrief)に使います。キーはローカルにのみ保存されます。"
+    })
+  ].join("");
 }
 
 function onboardingCardHtml(centered) {
@@ -1129,7 +1182,7 @@ function onboardingCardHtml(centered) {
   // 案件ゼロ(中央表示)のときは閉じるとホームが空白になるため、閉じるボタンを出さない
   return (centered ? '' : '<button type="button" class="onboardingCloseButton" id="onboardingCloseButton" aria-label="閉じる">&#215;</button>')
     + '<div class="onboardingCardHeader"><h3>CMO AI Lite をはじめよう</h3></div>'
-    + onboardingApiKeyRowHtml()
+    + onboardingApiKeyRowsHtml()
     + newProjectButtonHtml
     + '<hr class="onboardingDivider" />'
     + onboardingAgentSectionHtml(!centered);
@@ -1145,7 +1198,7 @@ function renderOnboardingCard() {
   // compact(案件あり)のときはAPIキー設定済みならカード自体を非表示にする。
   // centered(案件ゼロ)のときは常に表示(閉じるボタンがないため dismissed も無視)。
   if (!centered) {
-    const configured = openAiConfigured === true;
+    const configured = openAiConfigured === true && anthropicConfigured === true;
     const dismissed = localStorage.getItem(ONBOARDING_DISMISSED_KEY) === "1";
     if (configured || dismissed) {
       wrap.hidden = true;
@@ -4232,12 +4285,25 @@ async function saveOpenAiSettings() {
   const data = await post("/api/settings/openai", { apiKey: value });
   const status = $("#openAiStatus"); if (status) status.textContent = data.ok ? "\u8a2d\u5b9a\u6e08\u307f: " + data.settings.maskedKey : "\u4fdd\u5b58\u5931\u6557";
   if (data.ok) {
-    updateSidebarStatusCard(data.settings.configured);
     openAiConfigured = Boolean(data.settings.configured);
+    updateSidebarStatusCard();
     renderOnboardingCard();
   }
   writeTerminal(data.ok ? "system" : "error", data.ok ? "OpenAI\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002" : JSON.stringify(data, null, 2));
   if (data.ok && $("#openAiKey")) $("#openAiKey").value = "";
+}
+
+async function saveAnthropicSettings() {
+  const value = $("#anthropicKey")?.value.trim() || "";
+  const data = await post("/api/settings/anthropic", { apiKey: value });
+  const status = $("#anthropicStatus"); if (status) status.textContent = data.ok ? "\u8a2d\u5b9a\u6e08\u307f: " + data.settings.maskedKey : "\u4fdd\u5b58\u5931\u6557";
+  if (data.ok) {
+    anthropicConfigured = Boolean(data.settings.configured);
+    updateSidebarStatusCard();
+    renderOnboardingCard();
+  }
+  writeTerminal(data.ok ? "system" : "error", data.ok ? "Anthropic\u8a2d\u5b9a\u3092\u4fdd\u5b58\u3057\u307e\u3057\u305f\u3002" : JSON.stringify(data, null, 2));
+  if (data.ok && $("#anthropicKey")) $("#anthropicKey").value = "";
 }
 
 async function addExpressionRule() {
@@ -4782,7 +4848,7 @@ function switchView(view) {
   const breadcrumb = document.querySelector(".breadcrumb");
   if (h1) h1.textContent = labels[view] || h1.textContent;
   if (breadcrumb) breadcrumb.textContent = breadcrumbs[view] || breadcrumb.textContent;
-  if (view === "settings") loadOpenAiSettings();
+  if (view === "settings") loadApiSettings();
   renderViewStats();
 }
 
