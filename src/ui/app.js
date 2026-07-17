@@ -4766,16 +4766,16 @@ function switchView(view) {
   const showTabBar = Boolean(group) && group !== "research";
   const tabBar = document.querySelector(".tabBar");
   if (tabBar) tabBar.style.display = showTabBar ? "flex" : "none";
-  for (const button of $(".tabButton")) {
+  for (const button of $$(".tabButton")) {
     button.classList.toggle("active", button.dataset.view === view);
     button.style.display = group && button.dataset.group === group ? "" : "none";
   }
-  for (const button of $('[data-workspace]')) {
+  for (const button of $$('[data-workspace]')) {
     button.classList.toggle("active", button.dataset.workspace === view
       || (button.dataset.workspace === "products" && foundationViews.includes(view))
       || (button.dataset.workspace === "facts" && researchViews.includes(view)));
   }
-  for (const panel of $(".viewPanel")) panel.classList.toggle("active", panel.dataset.panel === view);
+  for (const panel of $$(".viewPanel")) panel.classList.toggle("active", panel.dataset.panel === view);
   const labels = { home: "\u6848\u4ef6\u30db\u30fc\u30e0", products: "\u524d\u63d0\u60c5\u5831 / \u5546\u54c1\u60c5\u5831", rules: "\u524d\u63d0\u60c5\u5831 / \u8868\u73fe\u30ec\u30ae\u30e5", images: "\u524d\u63d0\u60c5\u5831 / \u753b\u50cf", facts: "\u30ea\u30b5\u30fc\u30c1", strategies: "\u6226\u7565", banners: "\u5236\u4f5c", adTemplates: "\u5e83\u544a\u30c6\u30f3\u30d7\u30ecDB", settings: "\u8a2d\u5b9a" };
   const breadcrumbs = { home: "CMO AI Lite / \u6848\u4ef6\u30db\u30fc\u30e0", products: "CMO AI Lite / \u524d\u63d0\u60c5\u5831 / \u5546\u54c1\u60c5\u5831", rules: "CMO AI Lite / \u524d\u63d0\u60c5\u5831 / \u8868\u73fe\u30ec\u30ae\u30e5", images: "CMO AI Lite / \u524d\u63d0\u60c5\u5831 / \u753b\u50cf", facts: "CMO AI Lite / \u30ea\u30b5\u30fc\u30c1", strategies: "CMO AI Lite / \u6848\u4ef6\u30da\u30fc\u30b8 / \u6226\u7565", banners: "CMO AI Lite / \u6848\u4ef6\u30da\u30fc\u30b8 / \u5236\u4f5c", adTemplates: "CMO AI Lite / \u5171\u6709\u30e9\u30a4\u30d6\u30e9\u30ea / \u5e83\u544a\u30c6\u30f3\u30d7\u30ecDB", settings: "CMO AI Lite / \u8a2d\u5b9a" };
   const h1 = document.querySelector(".workspaceHeader h1");
