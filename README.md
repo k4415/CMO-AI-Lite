@@ -59,7 +59,10 @@ npm run dev
 5. **バナー案を追加** — 戦略・テンプレ・参照画像を選び、最大5枚まで追加
 6. **画像生成** — `gpt-image-2` で完成画像を出力
 
-セットアップマニュアル・利用マニュアルはLINEにてお配りしています。
+💡セットアップマニュアル・利用マニュアルはLINEにてお配りしています。
+
+↓　↓　↓　↓　↓
+
 **[LINEに登録してマニュアルを受け取る](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)**
 
 ## Claude Code / Codex から使う
@@ -108,5 +111,5 @@ npm run dev
 ## 開発者
 鴻上善彦（YoshihikoKokami） — CMO AI開発者、株式会社Icra 代表
 
-X: https://x.com/k_4415
-note：https://note.com/k4415
+- X: https://x.com/k_4415
+- note：https://note.com/k4415
