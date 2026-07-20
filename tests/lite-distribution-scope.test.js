@@ -185,9 +185,13 @@ test("ad-templates.json has exactly 100 bundled banner templates NO.001-100", as
   assert.deepEqual([...new Set(numbers)].sort((a, b) => a - b), Array.from({ length: 100 }, (_, index) => index + 1));
 });
 
-test("projects root contains only _template", async () => {
+test("projects rootの実案件をgitignoreし_templateを配布対象に残す", async () => {
   const entries = await listDir("projects");
-  assert.deepEqual(entries.sort(), ["_template"]);
+  assert.ok(entries.includes("_template"));
+  const gitignore = await readText(".gitignore");
+  assert.match(gitignore, /^projects\/\*$/m);
+  assert.match(gitignore, /^!projects\/_template\/$/m);
+  assert.match(gitignore, /^!projects\/_template\/\*\*$/m);
 });
 
 test("distribution skills are exactly four and match across providers", async () => {
@@ -220,7 +224,7 @@ test("active source and docs avoid removed Notion/N=1 references except the appr
   }
   for (const file of files) {
     if (file.includes(`${path.sep}docs${path.sep}superpowers${path.sep}`)) continue;
-    const relative = path.relative(root, file);
+    const relative = path.relative(root, file).split(path.sep).join("/");
     if (relative === "tests/lite-distribution-scope.test.js") continue;
     const source = await fs.readFile(file, "utf8");
     const content = relative === "src/ui/index.html" ? source.replace(sidebarHelpUrl, "") : source;

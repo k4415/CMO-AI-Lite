@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createProject, listProjects, updateProjectStatus } from "../src/core/project-store.js";
+import { createProject, listProjects, replaceFileWithRetry, updateProjectStatus, writeJson } from "../src/core/project-store.js";
 
 async function createTestProject(projectsRoot, id, overrides = {}) {
   const projectRoot = path.join(projectsRoot, id);
@@ -99,4 +99,82 @@ test("存在しない案件の更新を拒否する", async (t) => {
     updateProjectStatus(path.join(projectsRoot, "missing"), "archived"),
     (error) => error.code === "PROJECT_NOT_FOUND"
   );
+});
+
+test("Windowsの一時的なrenameエラーを再試行する", async () => {
+  const attempts = [];
+  const delays = [];
+  const removals = [];
+  const rename = async () => {
+    attempts.push(Date.now());
+    if (attempts.length < 3) throw Object.assign(new Error("temporarily locked"), { code: "EPERM" });
+  };
+
+  await replaceFileWithRetry("source.tmp", "target.json", {
+    rename,
+    remove: async (...args) => removals.push(args),
+    sleep: async (delayMs) => delays.push(delayMs),
+    retryDelays: [10, 20, 30]
+  });
+
+  assert.equal(attempts.length, 3);
+  assert.deepEqual(delays, [10, 20]);
+  assert.deepEqual(removals, [["source.tmp", { force: true }]]);
+});
+
+test("恒久的なrenameエラーは再試行せず一時ファイルを削除する", async () => {
+  let attempts = 0;
+  let removed = false;
+  const expected = Object.assign(new Error("invalid target"), { code: "EINVAL" });
+
+  await assert.rejects(
+    replaceFileWithRetry("source.tmp", "target.json", {
+      rename: async () => {
+        attempts += 1;
+        throw expected;
+      },
+      remove: async () => { removed = true; },
+      sleep: async () => assert.fail("恒久エラーは再試行しない")
+    }),
+    (error) => error === expected
+  );
+
+  assert.equal(attempts, 1);
+  assert.equal(removed, true);
+});
+
+test("renameの再試行上限後にエラーを返して一時ファイルを削除する", async () => {
+  let attempts = 0;
+  let removals = 0;
+  const expected = Object.assign(new Error("still locked"), { code: "EBUSY" });
+
+  await assert.rejects(
+    replaceFileWithRetry("source.tmp", "target.json", {
+      rename: async () => {
+        attempts += 1;
+        throw expected;
+      },
+      remove: async () => { removals += 1; },
+      sleep: async () => {},
+      retryDelays: [1, 2]
+    }),
+    (error) => error === expected
+  );
+
+  assert.equal(attempts, 3);
+  assert.equal(removals, 1);
+});
+
+test("writeJsonは既存ファイルを置換して一時ファイルを残さない", async (t) => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-write-json-"));
+  t.after(() => fs.rm(tempRoot, { recursive: true, force: true }));
+  const relativePath = "data/example.json";
+  await fs.mkdir(path.join(tempRoot, "data"), { recursive: true });
+  await fs.writeFile(path.join(tempRoot, relativePath), '{"before":true}\n', "utf8");
+
+  await writeJson(tempRoot, relativePath, { after: true });
+
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(tempRoot, relativePath), "utf8")), { after: true });
+  const leftovers = (await fs.readdir(path.join(tempRoot, "data"))).filter((name) => name.endsWith(".tmp"));
+  assert.deepEqual(leftovers, []);
 });
