@@ -253,23 +253,9 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
 .navItem.active { background: var(--brand-navy); border-radius: var(--r-md); }
 .navItem.active span.navIcon { color: #ffffff; }
 .navItem.active b { color: #ffffff; font-weight: 600; }
-.navProLink { text-decoration: none; }
-.navProLink:hover { background: var(--accent-50); }
-.navProLink .navItemBadge { background: var(--accent-100); color: var(--accent-700); }
 .navItem.muted, .navItem:disabled { color: var(--text-tertiary); cursor: default; }
 .navItem.muted span.navIcon, .navItem:disabled span.navIcon { color: var(--text-tertiary); }
 .navItem:disabled:hover { background: transparent; }
-.navItemBadge {
-  grid-area: badge;
-  justify-self: end;
-  padding: 2px 7px;
-  border-radius: var(--r-full);
-  background: var(--slate-100);
-  color: var(--slate-600);
-  font-size: 10.5px;
-  font-weight: 600;
-  white-space: nowrap;
-}
 
 /* Legacy accordion/quick-action rows kept out of the shipped nav. */
 .sideActions, .sideDisclosure, .collectionList { display: none !important; }
@@ -417,7 +403,7 @@ code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size
   box-shadow: none;
 }
 .appShell.sidebarCollapsed .navItem span.navIcon { justify-self: center; }
-.appShell.sidebarCollapsed .navItem b, .appShell.sidebarCollapsed .navItem small, .appShell.sidebarCollapsed .navItemBadge { display: none; }
+.appShell.sidebarCollapsed .navItem b, .appShell.sidebarCollapsed .navItem small { display: none; }
 /* 折りたたみ時: ヘルプカードはアイコンのみ、コピーライトは崩れを避けて非表示 */
 .appShell.sidebarCollapsed .sidebarHelpCard { justify-content: center; padding: 8px; }
 .appShell.sidebarCollapsed .sidebarHelpText { display: none; }

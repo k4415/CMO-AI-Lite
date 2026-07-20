@@ -103,12 +103,21 @@ const forbiddenContentPatterns = [
   /template-article/
 ];
 
+const sidebarHelpUrl = "https://icra-marketing-space.notion.site/CMO-AI-Lite-3a32e0f0cbe880a09438cac0edd3e803";
+
 const scanDirs = ["src", "config", "docs", "tests", "AGENTS.md", "CLAUDE.md", "DESIGN.md", "README.md", ".agents", ".claude", "projects/_template"];
 
 test("removed Pro/N=1 files are absent", async () => {
   for (const file of removedFiles) {
     assert.equal(await fileExists(file), false, `expected removed: ${file}`);
   }
+});
+
+test("sidebar removes the CMO AI Pro link and uses the approved help URL", async () => {
+  const indexHtml = await readText("src/ui/index.html");
+  assert.doesNotMatch(indexHtml, /CMO AI Pro|navProLink|navItemBadge/);
+  assert.ok(indexHtml.includes(`id="sidebarHelpCard" class="sidebarHelpCard" href="${sidebarHelpUrl}"`));
+  assert.equal(indexHtml.split(sidebarHelpUrl).length - 1, 1);
 });
 
 test("internal LP research fragments remain in core modules", async () => {
@@ -168,7 +177,7 @@ test("distribution skills are exactly four and match across providers", async ()
   }
 });
 
-test("active source and docs avoid removed Notion/N=1 references", async () => {
+test("active source and docs avoid removed Notion/N=1 references except the approved help URL", async () => {
   const files = [];
   for (const target of scanDirs) {
     const fullPath = path.join(root, target);
@@ -188,7 +197,8 @@ test("active source and docs avoid removed Notion/N=1 references", async () => {
     if (file.includes(`${path.sep}docs${path.sep}superpowers${path.sep}`)) continue;
     const relative = path.relative(root, file);
     if (relative === "tests/lite-distribution-scope.test.js") continue;
-    const content = await fs.readFile(file, "utf8");
+    const source = await fs.readFile(file, "utf8");
+    const content = relative === "src/ui/index.html" ? source.replace(sidebarHelpUrl, "") : source;
     for (const pattern of forbiddenContentPatterns) {
       assert.doesNotMatch(content, pattern, `${relative} contains forbidden pattern ${pattern}`);
     }
