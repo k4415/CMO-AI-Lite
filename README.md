@@ -20,6 +20,8 @@ Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git`
 - **バナー画像テンプレ** — 自社制作NO.001〜100の標準テンプレと新規テンプレ化
 - **バナー制作** — copyBrief + promptJson → `gpt-image-2` による画像生成
 
+[![CMO AI Lite でできること](docs/readme-assets/cmo-ai-lite-cando.png)](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)
+
 ## 利用条件
 
 本リポジトリは**厳密なOSSではなく**、株式会社Icraが権利を持つ**ソース公開版**です（`LICENSE` 参照）。
