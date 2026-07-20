@@ -40,9 +40,12 @@ const REQUIRED_FILES = [
 // エントリはプロセス生存中はファイルパスごとに残る(解決済みPromise1個分)。
 // 上限は触ったDBファイル数なのでローカル単一ユーザー用途では解放処理は不要。
 const fileLocks = new Map();
+const TRANSIENT_RENAME_ERROR_CODES = new Set(["EACCES", "EBUSY", "EPERM"]);
+const RENAME_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800, 1200];
 
 async function acquireProcessFileLock(absolutePath) {
   const lockPath = `${path.resolve(absolutePath)}.cmoai-lock`;
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
   const startedAt = Date.now();
   while (true) {
     try {
@@ -121,7 +124,32 @@ export async function writeJson(projectRoot, relativePath, value) {
   await fs.mkdir(path.dirname(target), { recursive: true });
   const tempPath = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`);
   await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  await fs.rename(tempPath, target);
+  await replaceFileWithRetry(tempPath, target);
+}
+
+// WindowsではDefenderやエディタが保存先を一時的に開いていると、既存ファイルを
+// 置換するrenameがEPERM/EACCES/EBUSYになる。原子的置換を維持したまま短時間だけ
+// 再試行し、成功・失敗にかかわらず未使用の一時ファイルを残さない。
+export async function replaceFileWithRetry(tempPath, target, options = {}) {
+  const rename = options.rename || fs.rename;
+  const remove = options.remove || fs.rm;
+  const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+  const retryDelays = Array.isArray(options.retryDelays) ? options.retryDelays : RENAME_RETRY_DELAYS_MS;
+  let retryIndex = 0;
+  try {
+    while (true) {
+      try {
+        await rename(tempPath, target);
+        return;
+      } catch (error) {
+        if (!TRANSIENT_RENAME_ERROR_CODES.has(error?.code) || retryIndex >= retryDelays.length) throw error;
+        await sleep(retryDelays[retryIndex]);
+        retryIndex += 1;
+      }
+    }
+  } finally {
+    await remove(tempPath, { force: true }).catch(() => {});
+  }
 }
 
 function isTransientJsonReadError(error) {

@@ -23,7 +23,11 @@ import {
 
 const BANNERS_PATH = "data/banner-creatives.json";
 export async function ensureBannerData(projectRoot) {
-  if (!(await pathExists(path.join(projectRoot, BANNERS_PATH)))) await writeJson(projectRoot, BANNERS_PATH, []);
+  const target = path.join(projectRoot, BANNERS_PATH);
+  if (await pathExists(target)) return;
+  await withFileLock(target, async () => {
+    if (!(await pathExists(target))) await writeJson(projectRoot, BANNERS_PATH, []);
+  });
 }
 
 export async function listBannerCreatives(projectRoot) {
