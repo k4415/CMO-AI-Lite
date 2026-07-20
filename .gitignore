@@ -16,6 +16,7 @@ tmp/
 .shot.tmp.mjs
 .superpowers/
 .codex-handoff.md
+.codex-validation/
 .worktrees/
 
 # ユーザーがアップロードしたテンプレ参照画像(配布に含めない)

@@ -322,5 +322,6 @@ test("Stage 2は同じgeneration contractを保存し、当たる理由を追加
   assert.equal(proposal.creativeHypothesis.oneMessage, "広告制作AIで制作時間を5分の1にする");
   assert.equal(proposal.copyBrief.messagePlan.productOrTaskAnchor, "広告制作AI");
   assert.equal(proposal.promptJson.copyBrief.readoutText, "広告制作AI / 制作時間を5分の1に");
-  assert.match(prompt, /BannerGenerationContract/);
+  assert.match(prompt, /# Stage2Input/);
+  assert.doesNotMatch(prompt, /# BannerGenerationContract/);
 });

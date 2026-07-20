@@ -121,16 +121,11 @@ export function sanitizeTemplateCopyForPrompt(value) {
   return {
     id: String(source.id || ""),
     reuseMethod: String(source.reuseMethod || ""),
-    persuasionMechanism: source.persuasionMechanism || null,
     slots: (Array.isArray(source.slots) ? source.slots : []).map((slot) => ({
       slotId: String(slot?.slotId || ""),
       role: String(slot?.role || ""),
       messageRole: String(slot?.messageRole || ""),
-      charBudget: Number(slot?.charBudget) || 0,
-      rhetoricalDevice: String(slot?.rhetoricalDevice || ""),
-      psychologicalMechanism: String(slot?.psychologicalMechanism || ""),
-      ...(slot?.pattern ? { pattern: String(slot.pattern) } : {}),
-      ...(Array.isArray(slot?.variables) ? { variables: slot.variables.map((item) => String(item || "")).filter(Boolean) } : {})
+      charBudget: Number(slot?.charBudget) || 0
     }))
   };
 }

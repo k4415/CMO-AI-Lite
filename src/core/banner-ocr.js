@@ -76,15 +76,19 @@ async function runOcrEvidence(imagePath, regions) {
     const fullResult = await worker.recognize(imagePath, {}, { text: true, blocks: true });
     const logoRegionTexts = [];
     for (const region of Array.isArray(regions) ? regions : []) {
-      let text = textFromOcrBlocksInRegion(fullResult.data?.blocks, region.rectangle);
-      if (!text) {
+      let evidence = evidenceFromOcrBlocksInRegion(fullResult.data?.blocks, region.rectangle);
+      if (!evidence.text) {
         const result = await worker.recognize(imagePath, { rectangle: region.rectangle });
-        text = String(result.data?.text || "").trim();
+        evidence = {
+          text: String(result.data?.text || "").trim(),
+          confidence: finiteConfidence(result.data?.confidence)
+        };
       }
       logoRegionTexts.push({
         slotId: String(region.slotId || ""),
         rectangle: region.rectangle,
-        text
+        text: evidence.text,
+        ...(evidence.confidence === null ? {} : { confidence: evidence.confidence })
       });
     }
     return { ocrText: String(fullResult.data?.text || "").trim(), logoRegionTexts };
@@ -94,16 +98,30 @@ async function runOcrEvidence(imagePath, regions) {
 }
 
 export function textFromOcrBlocksInRegion(blocks, rectangle) {
-  if (!rectangle || !Array.isArray(blocks)) return "";
+  return evidenceFromOcrBlocksInRegion(blocks, rectangle).text;
+}
+
+export function evidenceFromOcrBlocksInRegion(blocks, rectangle) {
+  if (!rectangle || !Array.isArray(blocks)) return { text: "", confidence: null };
   const words = [];
   collectOcrWords(blocks, words, new WeakSet());
-  return words
-    .filter((word) => boxesIntersect(word.bbox, rectangle))
+  const matchingWords = words.filter((word) => boxesIntersect(word.bbox, rectangle));
+  const text = matchingWords
     .map((word) => String(word.text || "").trim())
     .filter(Boolean)
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+  const confidences = matchingWords.map((word) => finiteConfidence(word.confidence)).filter((value) => value !== null);
+  const confidence = confidences.length
+    ? Math.round(confidences.reduce((sum, value) => sum + value, 0) / confidences.length)
+    : null;
+  return { text, confidence };
+}
+
+function finiteConfidence(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : null;
 }
 
 function collectOcrWords(value, words, seen) {

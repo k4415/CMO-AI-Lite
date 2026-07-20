@@ -26,6 +26,22 @@ import {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+async function waitUntil(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("condition timeout");
+    await wait(1);
+  }
+}
+
 test("keyed queue runs jobs for the same project in FIFO order", async () => {
   const queue = new KeyedFifoQueue();
   const events = [];
@@ -335,6 +351,35 @@ test("画像生成失敗時にrequest id・prompt hash・所要時間の監査�
   assert.equal(failed.imageGenerationStatus, "failed");
 });
 
+test("画像ノードはAPI処理開始と完了の時刻・所要時間を保存する", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-image-node-timing-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  const banner = await addBannerCreative(projectRoot, { productId: "p1", strategyId: "s1", title: "timing" });
+  await claimBannerImageGeneration(projectRoot, banner.id, {
+    ownerId: "server-a",
+    attemptId: "image-timing",
+    leaseMs: 60000
+  });
+
+  const started = await startBannerImageGeneration(projectRoot, banner.id, "image-timing");
+  assert.ok(Number.isFinite(Date.parse(started.pipelineNodes.image.startedAt)));
+  assert.equal(started.pipelineNodes.image.completedAt, "");
+
+  const completed = await completeBannerImageGeneration(projectRoot, banner.id, "image-timing", {
+    generatedImagePath: "outputs/banners/timing.png",
+    generatedImageHash: "sha256:timing",
+    generatedImageModel: "gpt-image-2",
+    generatedImageSize: "1024x1024"
+  });
+  assert.ok(Number.isFinite(Date.parse(completed.pipelineNodes.image.completedAt)));
+  assert.ok(completed.pipelineNodes.image.durationMs >= 0);
+  assert.equal(
+    completed.pipelineNodes.image.durationMs,
+    Date.parse(completed.pipelineNodes.image.completedAt) - Date.parse(completed.pipelineNodes.image.startedAt)
+  );
+});
+
 test("worker pool keeps at most two image jobs active and starts them FIFO", async () => {
   const pool = new FifoWorkerPool(2);
   let active = 0;
@@ -352,6 +397,29 @@ test("worker pool keeps at most two image jobs active and starts them FIFO", asy
   assert.deepEqual(await Promise.all(jobs), [1, 2, 3, 4]);
   assert.equal(maxActive, 2);
   assert.deepEqual(starts, [1, 2, 3, 4]);
+});
+
+test("worker poolは10件を同時実行し、11件目を待機させる", async () => {
+  const pool = new FifoWorkerPool(10);
+  const release = deferred();
+  let active = 0;
+  let peak = 0;
+  const starts = [];
+  const jobs = Array.from({ length: 11 }, (_, index) => pool.run(async () => {
+    starts.push(index + 1);
+    active += 1;
+    peak = Math.max(peak, active);
+    await release.promise;
+    active -= 1;
+  }));
+
+  await waitUntil(() => peak === 10);
+  assert.equal(peak, 10);
+  assert.deepEqual(starts, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+  release.resolve();
+  await Promise.all(jobs);
+  assert.deepEqual(starts, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 });
 
 test("image API timeout defaults to ten minutes and accepts an explicit override", () => {
