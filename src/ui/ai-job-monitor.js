@@ -68,6 +68,14 @@ export function isAiJobSnapshotCurrent({ requestGeneration, currentGeneration, r
   return requestGeneration === currentGeneration && requestProject === currentProject;
 }
 
+export function placeAiJobMonitorButton({ button, home, dock, detailOpen = false } = {}) {
+  const target = detailOpen ? dock : home;
+  if (!button || !target) return "unavailable";
+  if (button.parentElement !== target) target.appendChild(button);
+  button.classList?.toggle("isDocked", Boolean(detailOpen));
+  return detailOpen ? "docked" : "home";
+}
+
 export async function fetchAiJobSnapshot(fetchImpl, url, { etag = "", signal } = {}) {
   try {
     const headers = etag ? { "if-none-match": etag } : {};

@@ -12,12 +12,14 @@
   </head>
   <body>
     <div id="toastStack" class="toastStack" aria-live="polite"></div>
-    <button id="aiJobMonitorButton" class="aiJobMonitorButton" type="button" aria-controls="aiJobMonitorPanel" aria-expanded="false">
-      <span class="aiJobMonitorButtonIcon" aria-hidden="true">AI</span>
-      <span>AIジョブ</span>
-      <span id="aiJobMonitorBadge" class="aiJobMonitorBadge" hidden>0</span>
-      <span id="aiJobMonitorAlert" class="aiJobMonitorAlert" hidden aria-label="確認が必要なジョブがあります"></span>
-    </button>
+    <div id="aiJobMonitorButtonHome" class="aiJobMonitorButtonHome">
+      <button id="aiJobMonitorButton" class="aiJobMonitorButton" type="button" aria-label="AIジョブ" title="AIジョブ" aria-controls="aiJobMonitorPanel" aria-expanded="false">
+        <span class="aiJobMonitorButtonIcon" aria-hidden="true">AI</span>
+        <span class="aiJobMonitorButtonLabel">AIジョブ</span>
+        <span id="aiJobMonitorBadge" class="aiJobMonitorBadge" hidden>0</span>
+        <span id="aiJobMonitorAlert" class="aiJobMonitorAlert" hidden aria-label="確認が必要なジョブがあります"></span>
+      </button>
+    </div>
     <section id="aiJobMonitorPanel" class="aiJobMonitorPanel" aria-labelledby="aiJobMonitorTitle" hidden>
       <header class="aiJobMonitorHeader">
         <div><span>進捗モニター</span><h2 id="aiJobMonitorTitle">AIジョブ</h2></div>
@@ -273,6 +275,7 @@
             <div id="detailPaneStatusRow" class="detailPaneStatusRow"></div>
           </div>
           <div class="detailPaneHeaderActions">
+            <div id="detailAiJobMonitorDock" class="detailAiJobMonitorDock"></div>
             <button id="expandDetailPane" class="detailExpandButton" type="button" title="&#x8A73;&#x7D30;&#x3092;&#x62E1;&#x5927;&#x8868;&#x793A;"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H4a1 1 0 0 0-1 1v4"/><path d="M16 3h4a1 1 0 0 1 1 1v4"/><path d="M8 21H4a1 1 0 0 1-1-1v-4"/><path d="M16 21h4a1 1 0 0 0 1-1v-4"/></svg>&#x62E1;&#x5927;</button>
             <button id="closeDetailPane" type="button" aria-label="&#x8A73;&#x7D30;&#x3092;&#x9589;&#x3058;&#x308B;">&#x00D7;</button>
           </div>
