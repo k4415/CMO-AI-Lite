@@ -14,6 +14,14 @@ import {
   removeSelectionById,
   selectionDisplayNumber
 } from "/core/banner-range-edit.js";
+import {
+  buildAiJobViewModel,
+  collectAiJobTerminalTransitions,
+  fetchAiJobSnapshot as requestAiJobSnapshot,
+  formatAiJobElapsed,
+  isAiJobSnapshotCurrent,
+  pollDelayForAiJobs
+} from "/ai-job-monitor.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -32,6 +40,23 @@ let lastUiTrigger = null;
 let researchWorkflowProgress = null;
 const SELECTED_PROJECT_KEY = "cmoai:selectedProject";
 const RECENT_PROJECTS_KEY = "cmoai:recentProjects";
+let aiJobSnapshot = { activeCount: 0, jobs: [], sourceWarning: "" };
+let aiJobProjectPath = "";
+let aiJobEtag = "";
+let aiJobPollTimer = null;
+let aiJobPollInFlight = false;
+let aiJobPollRequested = false;
+let aiJobPollGeneration = 0;
+let aiJobAbortController = null;
+let aiJobInitialized = false;
+let aiJobFetchError = "";
+let aiJobLastSuccessAt = 0;
+let aiJobFailureCount = 0;
+let aiJobUserMinimized = false;
+let aiJobHasUnseenAlert = false;
+let aiJobElapsedTimer = null;
+let aiJobResearchRefreshTimer = null;
+const aiJobNotifiedTerminalIds = new Set();
 
 function emptyResearchWorkspace() {
   return { products: [], materials: [], facts: [], expressionRules: [], extractionJobs: [], strategies: [], banners: [], adTemplates: [] };
@@ -235,6 +260,10 @@ on("#saveOpenAiSettings", "click", saveOpenAiSettings);
 on("#saveAnthropicSettings", "click", saveAnthropicSettings);
 on("#focusBanners", "click", () => switchView("banners"));
 on("#clearSelection", "click", () => selectItem(null, null));
+on("#aiJobMonitorButton", "click", toggleAiJobMonitor);
+on("#closeAiJobMonitor", "click", closeAiJobMonitor);
+on("#refreshAiJobMonitor", "click", requestAiJobPollSoon);
+document.addEventListener("visibilitychange", requestAiJobPollSoon);
 initDetailResize();
 initTableKeyboard();
 document.querySelector(".appShell")?.style.setProperty("--detail-width", `${detailWidth}px`);
@@ -313,6 +342,7 @@ async function loadProjects() {
 
 async function refreshProjectData() {
   renderSelectedProject();
+  activateAiJobMonitorProject(selectedProject()?.path || "");
   // 案件切替・初回読込で loadResearch() が走る間だけスケルトンを見せる。
   // 150ms以内に完了した場合はタイマーを止めて出さない(ちらつき防止)。
   const skeletonTimer = setTimeout(showResearchSkeleton, 150);
@@ -1988,7 +2018,7 @@ async function handleRegulationImportFile(event) {
     writeTerminal("system", `\u30d5\u30a1\u30a4\u30eb\u304b\u3089\u6587\u5b57\u8d77\u3053\u3057\u3092\u53d6\u5f97\u3057\u307e\u3057\u305f\uff08${file.name} / ${data.method || ""}\uff09\u3002AI\u3067\u8868\u73fe\u30ec\u30ae\u30e5\u30ec\u30fc\u30b7\u30e7\u30f3\u3092\u62bd\u51fa\u3057\u307e\u3059...`);
     let extracted;
     try {
-      extracted = await post("/api/regulations/extract-text", { text });
+      extracted = await post("/api/regulations/extract-text", { text, project: project.path });
     } catch (error) {
       showToast("error", error.message || "AI\u62bd\u51fa\u306b\u5931\u6557\u3057\u307e\u3057\u305f\u3002");
       return;
@@ -5100,6 +5130,297 @@ function showToast(kind, message) {
   return toast;
 }
 
+function toggleAiJobMonitor() {
+  const panel = $("#aiJobMonitorPanel");
+  if (!panel) return;
+  if (panel.hidden) openAiJobMonitor();
+  else closeAiJobMonitor();
+}
+
+function openAiJobMonitor({ automatic = false } = {}) {
+  if (automatic && aiJobUserMinimized) return;
+  const panel = $("#aiJobMonitorPanel");
+  const button = $("#aiJobMonitorButton");
+  if (panel) panel.hidden = false;
+  button?.setAttribute("aria-expanded", "true");
+  if (!automatic) aiJobUserMinimized = false;
+  aiJobHasUnseenAlert = false;
+  renderAiJobMonitor();
+  void requestAiJobPollSoon();
+}
+
+function closeAiJobMonitor() {
+  const panel = $("#aiJobMonitorPanel");
+  const button = $("#aiJobMonitorButton");
+  if (panel) panel.hidden = true;
+  button?.setAttribute("aria-expanded", "false");
+  aiJobUserMinimized = true;
+  scheduleAiJobPoll(pollDelayForCurrentAiJobs());
+}
+
+function activateAiJobMonitorProject(projectPath) {
+  if (aiJobProjectPath === projectPath) {
+    if (projectPath) void requestAiJobPollSoon();
+    return;
+  }
+  aiJobProjectPath = projectPath;
+  aiJobPollGeneration += 1;
+  aiJobEtag = "";
+  aiJobInitialized = false;
+  aiJobFetchError = "";
+  aiJobLastSuccessAt = 0;
+  aiJobFailureCount = 0;
+  aiJobHasUnseenAlert = false;
+  aiJobSnapshot = { activeCount: 0, jobs: [], sourceWarning: "" };
+  aiJobNotifiedTerminalIds.clear();
+  aiJobAbortController?.abort();
+  aiJobAbortController = null;
+  if (aiJobPollTimer) clearTimeout(aiJobPollTimer);
+  aiJobPollTimer = null;
+  renderAiJobMonitor();
+  if (projectPath) scheduleAiJobPoll(0);
+}
+
+function requestAiJobPollSoon() {
+  if (!aiJobProjectPath) return;
+  if (aiJobPollInFlight) {
+    aiJobPollRequested = true;
+    return;
+  }
+  scheduleAiJobPoll(0);
+}
+
+function scheduleAiJobPoll(delayMs) {
+  if (aiJobPollTimer) clearTimeout(aiJobPollTimer);
+  aiJobPollTimer = null;
+  if (!aiJobProjectPath) return;
+  aiJobPollTimer = setTimeout(runAiJobPoll, Math.max(0, Number(delayMs) || 0));
+}
+
+async function runAiJobPoll() {
+  aiJobPollTimer = null;
+  if (!aiJobProjectPath || aiJobPollInFlight) return;
+  aiJobPollInFlight = true;
+  aiJobPollRequested = false;
+  const requestGeneration = aiJobPollGeneration;
+  const requestProject = aiJobProjectPath;
+  const controller = new AbortController();
+  aiJobAbortController = controller;
+  try {
+    const result = await fetchAiJobSnapshot(requestProject, controller.signal);
+    if (!isAiJobSnapshotCurrent({
+      requestGeneration,
+      currentGeneration: aiJobPollGeneration,
+      requestProject,
+      currentProject: aiJobProjectPath
+    })) return;
+    if (result.kind === "aborted") return;
+    if (result.kind === "error") {
+      aiJobFailureCount += 1;
+      aiJobFetchError = result.message || "AIジョブ情報を取得できませんでした。";
+      renderAiJobMonitor();
+      return;
+    }
+    aiJobFetchError = "";
+    aiJobFailureCount = 0;
+    aiJobLastSuccessAt = Date.now();
+    if (result.etag) aiJobEtag = result.etag;
+    if (result.kind === "snapshot") applyAiJobSnapshot(result.snapshot);
+  } finally {
+    if (aiJobAbortController === controller) aiJobAbortController = null;
+    aiJobPollInFlight = false;
+    const nextDelay = aiJobPollRequested ? 0 : pollDelayForCurrentAiJobs();
+    scheduleAiJobPoll(nextDelay);
+  }
+}
+
+async function fetchAiJobSnapshot(projectPath, signal) {
+  const url = `/api/ai-jobs?project=${encodeURIComponent(projectPath)}&recentLimit=20`;
+  return requestAiJobSnapshot(fetch, url, { etag: aiJobEtag, signal });
+}
+
+function applyAiJobSnapshot(nextSnapshot) {
+  const previousJobs = aiJobSnapshot.jobs || [];
+  const nextJobs = Array.isArray(nextSnapshot.jobs) ? nextSnapshot.jobs : [];
+  const transitions = collectAiJobTerminalTransitions(previousJobs, nextJobs, {
+    initialized: aiJobInitialized,
+    notifiedIds: aiJobNotifiedTerminalIds
+  });
+  if (!aiJobInitialized) {
+    for (const job of nextJobs) {
+      if (["completed", "completed_with_warnings", "failed", "stale"].includes(job.status)) aiJobNotifiedTerminalIds.add(job.id);
+    }
+  }
+  aiJobSnapshot = nextSnapshot;
+  aiJobInitialized = true;
+  if (transitions.some((job) => ["failed", "stale"].includes(job.status))) aiJobHasUnseenAlert = true;
+  renderAiJobMonitor();
+  for (const job of transitions) notifyAiJobTerminal(job);
+  if (transitions.length) requestAiJobResearchRefresh();
+}
+
+function notifyAiJobTerminal(job) {
+  const title = String(job.title || "AI処理");
+  if (job.status === "failed") return showToast("error", `${title}に失敗しました。${job.errorMessage || ""}`);
+  if (job.status === "stale") return showToast("error", `${title}が中断している可能性があります。`);
+  if (job.status === "completed_with_warnings") return showToast("info", `${title}が警告ありで完了しました。`);
+  return showToast("success", `${title}が完了しました。`);
+}
+
+function requestAiJobResearchRefresh() {
+  if (liveRefreshTimer || hasActiveWork()) return;
+  if (aiJobResearchRefreshTimer) clearTimeout(aiJobResearchRefreshTimer);
+  aiJobResearchRefreshTimer = setTimeout(async () => {
+    aiJobResearchRefreshTimer = null;
+    if (liveRefreshTimer || hasActiveWork()) return;
+    if (isEditingNow()) return requestAiJobResearchRefresh();
+    try {
+      await loadResearch();
+      renderResearchPreservingAdTemplateDraft();
+      if (selected) { refreshSelectedPayload(); renderInspector(); }
+    } catch {}
+  }, 750);
+}
+
+function pollDelayForCurrentAiJobs() {
+  const normalDelay = pollDelayForAiJobs({
+    hidden: document.hidden,
+    panelOpen: !$("#aiJobMonitorPanel")?.hidden,
+    activeCount: Number(aiJobSnapshot.activeCount) || 0
+  });
+  if (!aiJobFailureCount) return normalDelay;
+  return Math.min(30_000, normalDelay * (2 ** Math.min(4, aiJobFailureCount)));
+}
+
+function renderAiJobMonitor() {
+  const badge = $("#aiJobMonitorBadge");
+  const alert = $("#aiJobMonitorAlert");
+  const warning = $("#aiJobMonitorWarning");
+  const projectLabel = $("#aiJobMonitorProject");
+  const button = $("#aiJobMonitorButton");
+  const list = $("#aiJobMonitorList");
+  const empty = $("#aiJobMonitorEmpty");
+  if (!badge || !alert || !warning || !list || !empty) return;
+  const model = buildAiJobViewModel(aiJobSnapshot);
+  button?.classList.toggle("isActive", model.activeCount > 0);
+  badge.hidden = model.activeCount === 0;
+  badge.textContent = String(model.activeCount);
+  alert.hidden = !aiJobHasUnseenAlert;
+  if (projectLabel) projectLabel.textContent = selectedProject() ? projectLabelForAiJobs(selectedProject()) : "案件未選択";
+  const lastSuccess = aiJobLastSuccessAt ? `（最終更新 ${new Date(aiJobLastSuccessAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}）` : "";
+  const warningText = aiJobFetchError ? `${aiJobFetchError} 再試行します。${lastSuccess}` : model.sourceWarning;
+  warning.hidden = !warningText;
+  warning.textContent = warningText;
+  list.replaceChildren();
+  empty.hidden = !model.empty;
+  empty.textContent = aiJobProjectPath
+    ? "実行中または最近完了したAIジョブはありません。"
+    : "案件を選択するとAI処理の進捗を確認できます。";
+  if (!model.empty) {
+    if (model.activeJobs.length) {
+      list.appendChild(createAiJobSectionLabel(`実行中・待機中 ${model.activeJobs.length}`));
+      for (const job of model.activeJobs) list.appendChild(createAiJobMonitorItem(job));
+    } else {
+      const idle = document.createElement("p");
+      idle.className = "aiJobMonitorIdle";
+      idle.textContent = "現在実行中のAI処理はありません。";
+      list.appendChild(idle);
+    }
+    if (model.recentJobs.length) {
+      list.appendChild(createAiJobSectionLabel("最近完了"));
+      for (const job of model.recentJobs) list.appendChild(createAiJobMonitorItem(job));
+    }
+  }
+  syncAiJobElapsedTimer(model.activeCount);
+}
+
+function createAiJobSectionLabel(text) {
+  const label = document.createElement("h3");
+  label.className = "aiJobMonitorSectionLabel";
+  label.textContent = text;
+  return label;
+}
+
+function createAiJobMonitorItem(job) {
+  const item = document.createElement("article");
+  item.className = `aiJobMonitorItem is-${job.presentation.tone}`;
+  const top = document.createElement("div");
+  top.className = "aiJobMonitorItemTop";
+  const icon = document.createElement("span");
+  icon.className = "aiJobMonitorStatusIcon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.textContent = job.presentation.icon;
+  const title = document.createElement("div");
+  title.className = "aiJobMonitorItemTitle";
+  const strong = document.createElement("strong");
+  strong.textContent = job.title;
+  const status = document.createElement("span");
+  status.textContent = job.statusLabel || job.presentation.label;
+  title.append(strong, status);
+  const elapsed = document.createElement("span");
+  elapsed.className = "aiJobElapsed";
+  elapsed.dataset.startedAt = job.startedAt || "";
+  elapsed.dataset.finishedAt = job.finishedAt || "";
+  elapsed.textContent = formatAiJobElapsed(job.elapsedMs);
+  top.append(icon, title, elapsed);
+  item.appendChild(top);
+  if (job.steps.length > 1 && !job.indeterminate) {
+    const steps = document.createElement("div");
+    steps.className = "aiJobSteps";
+    steps.setAttribute("aria-label", job.steps.map((step) => `${step.label}: ${step.status}`).join("、"));
+    for (const step of job.steps) {
+      const marker = document.createElement("span");
+      marker.className = `aiJobStep is-${step.status}`;
+      marker.title = step.label;
+      steps.appendChild(marker);
+    }
+    item.appendChild(steps);
+  }
+  if (job.note) appendAiJobDetail(item, job.note, false);
+  if (job.errorMessage) appendAiJobDetail(item, job.errorMessage, true);
+  return item;
+}
+
+function appendAiJobDetail(item, text, isError) {
+  const detail = document.createElement("p");
+  detail.className = `aiJobMonitorDetail${isError ? " aiJobMonitorError" : ""}`;
+  detail.textContent = text;
+  item.appendChild(detail);
+  if (isError && String(text).length > 80) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "aiJobErrorToggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.textContent = "エラー全文を表示";
+    toggle.addEventListener("click", () => {
+      const expanded = detail.classList.toggle("isExpanded");
+      toggle.setAttribute("aria-expanded", String(expanded));
+      toggle.textContent = expanded ? "エラーを閉じる" : "エラー全文を表示";
+    });
+    item.appendChild(toggle);
+  }
+}
+
+function syncAiJobElapsedTimer(activeCount) {
+  if (!activeCount) {
+    if (aiJobElapsedTimer) clearInterval(aiJobElapsedTimer);
+    aiJobElapsedTimer = null;
+    return;
+  }
+  if (!aiJobElapsedTimer) aiJobElapsedTimer = setInterval(updateAiJobElapsedLabels, 1000);
+  updateAiJobElapsedLabels();
+}
+
+function updateAiJobElapsedLabels() {
+  const now = Date.now();
+  for (const element of $$(".aiJobElapsed")) {
+    const startedAt = Date.parse(element.dataset.startedAt || "");
+    const finishedAt = Date.parse(element.dataset.finishedAt || "");
+    if (!Number.isFinite(startedAt)) continue;
+    element.textContent = formatAiJobElapsed((Number.isFinite(finishedAt) ? finishedAt : now) - startedAt);
+  }
+}
+
 // Prevents double-clicking the same AI action twice while it is in flight, and
 // gives the triggering button an immediate "running" state. Keyed per
 // action+target (e.g. "bannerPrompt:bn_123") so unrelated rows/products can
@@ -5220,6 +5541,10 @@ async function runExclusive(key, button, fn) {
     return undefined;
   }
   runningActions.add(key);
+  if (isAiJobActionKey(key)) {
+    openAiJobMonitor({ automatic: true });
+    void requestAiJobPollSoon();
+  }
   ensureLiveRefresh();
   const originalLabel = button ? button.textContent : null;
   if (button) {
@@ -5242,6 +5567,14 @@ async function runExclusive(key, button, fn) {
 
 function isRunning(key) {
   return runningActions.has(key);
+}
+
+function isAiJobActionKey(key) {
+  return /^(factExtraction|researchSourceImport|whoWhat|rulesImportFile|materialExtract|templateImage|bannerBatch|bannerPrompt|bannerImage|bannerEdit|bannerFullEdit)/.test(String(key || ""));
+}
+
+function projectLabelForAiJobs(project) {
+  return project?.name || project?.productName || "現在の案件";
 }
 
 // Row/card action buttons are rebuilt on every renderResearch(), so their
@@ -6135,7 +6468,13 @@ function projectLabel(project) {
 function hostname(url) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } }
 function on(selector, event, handler) { const element = $(selector); if (element) element.addEventListener(event, handler); }
 async function get(url) { const res = await fetch(url); return res.json(); }
-async function post(url, body) { return requestJson(url, { method: "POST", body }); }
+async function post(url, body) {
+  const data = await requestJson(url, { method: "POST", body });
+  if (/^\/api\/(research\/(materials\/extract|facts\/extract-ai)|regulations\/(import-text|extract-text)|strategies\/generate|ad-templates\/template-image|banners\/)/.test(url)) {
+    void requestAiJobPollSoon();
+  }
+  return data;
+}
 async function requestJson(url, { method = "GET", body } = {}) { const options = { method, headers: { "content-type": "application/json" } }; if (body !== undefined) options.body = JSON.stringify(body); const res = await fetch(url, options); return res.json(); }
 function clearInputs(selectors) { for (const selector of selectors) { const element = $(selector); if (element) element.value = ""; } }
 function clip(value, length = 90) { const text = String(value || ""); return text.length > length ? `${text.slice(0, length)}...` : text; }
