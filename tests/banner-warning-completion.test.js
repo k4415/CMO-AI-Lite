@@ -151,6 +151,48 @@ test("ロゴ枠で正式ワードマークを確認できない場合はlogo_mis
   assert.match(patch.reviewNotes, /Sample Smile/);
 });
 
+test("画像全体だけでロゴを確認した場合は位置未確認として保存する", () => {
+  const patch = normalizeBannerImageCompletionPatch({
+    relativePath: "outputs/banner.png",
+    banner: { warnings: [] },
+    logoVerification: {
+      status: "present_unlocalized",
+      required: true,
+      expected: ["Sample Smile"],
+      missing: [],
+      observed: [],
+      items: [{ assetOrdinal: 1, mode: "selected_asset_override", status: "present_unlocalized", reason: "full_ocr_only" }]
+    }
+  });
+
+  const warning = patch.warnings.find((item) => item.type === "logo_mismatch");
+  assert.equal(warning.code, "LOGO_LOCATION_UNVERIFIED");
+  assert.match(warning.message, /画像全体.*確認/);
+  assert.doesNotMatch(warning.message, /欠落/);
+  assert.match(patch.reviewNotes, /画像全体.*確認/);
+});
+
+test("選択素材例外でOCR不在なら欠落と断定せず目視確認にする", () => {
+  const patch = normalizeBannerImageCompletionPatch({
+    relativePath: "outputs/banner.png",
+    banner: { warnings: [] },
+    logoVerification: {
+      status: "not_verifiable",
+      required: true,
+      expected: ["Sample Smile"],
+      missing: [],
+      observed: [],
+      note: "OCRだけでは配置を確認できません。",
+      items: [{ assetOrdinal: 1, mode: "selected_asset_override", status: "not_verifiable", reason: "ocr_absence_unconfirmed" }]
+    }
+  });
+
+  const warning = patch.warnings.find((item) => item.type === "logo_mismatch");
+  assert.equal(warning.code, "LOGO_PRESENCE_UNVERIFIED");
+  assert.match(warning.message, /目視|確認できません/);
+  assert.doesNotMatch(warning.message, /欠落/);
+});
+
 test("旧審査ステータスの保存済みバナーはlistBannerCreativesで読める", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-banner-legacy-status-"));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));

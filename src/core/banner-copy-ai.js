@@ -651,7 +651,7 @@ export function buildBannerCopyPrompt(input) {
     "# 表現レギュレーション",
     JSON.stringify(input.expressionRules || [], null, 2),
     "",
-    "# テンプレ勝ちコピー参照",
+    "# テンプレコピー枠構造",
     JSON.stringify(sanitizeTemplateCopyForPrompt(input.templateCopy), null, 2),
     "",
     "# カテゴリ距離と再利用方法",
@@ -667,7 +667,7 @@ export function buildBannerCopyPrompt(input) {
     "briefs の件数は指定案数と一致させる。",
     "選択WHO-WHAT外の機能・用途・戦略を混入させない。",
     "追加指示原文は表現レギュレーションより優先する。追加指示を固定モード名へ置換せず、protectedFieldsを維持しながら原文の意味を反映する。",
-    "categoryRelation.reuseMethod が mechanism_only の場合、元コピーの文言・語順・表層構文を再現せず、心理メカニズムだけを使う。pattern_fill の場合だけ、copyBlueprintのpatternへ選択WHO-WHATの要素を充填する。",
+    "categoryRelation.reuseMethod にかかわらず、テンプレートから使うのはslotId・role・messageRole・charBudgetだけとする。元広告の文言・語順・表層構文・心理メカニズム・コピーpattern・募集や限定などの意味を新しいコピーへ持ち込まない。",
     "CreativeHypothesisContractは確定済み正本であり、対象、切り口、primaryPromise、templateMechanismを変更しない。",
     "ApprovedClaimSnapshot外の数字、価格、期間、実績、比較、保証、オファーを作らず、claimIdを発明しない。",
     "各slotTextsへ対応するhypothesisIdを付ける。CTA、純粋な注記、ブランド表示、純装飾以外の主張slotには1件以上のclaimIdsを付ける。",
@@ -879,18 +879,11 @@ export function buildTemplateCopyInput(template, relation = null) {
     slotId: String(slot?.slotId || ""),
     role: String(slot?.role || ""),
     messageRole: String(slot?.messageRole || ""),
-    charBudget: Number(slot?.charBudget) || 0,
-    rhetoricalDevice: String(slot?.rhetoricalDevice || ""),
-    psychologicalMechanism: String(slot?.psychologicalMechanism || ""),
-    ...(normalizedRelation.reuseMethod === "pattern_fill" ? {
-      pattern: String(slot?.pattern || ""),
-      variables: Array.isArray(slot?.variables) ? slot.variables : []
-    } : {})
+    charBudget: Number(slot?.charBudget) || 0
   }));
   return {
     id: template.id || "",
     reuseMethod: normalizedRelation.reuseMethod,
-    persuasionMechanism: blueprint.persuasionMechanism || template.templatePromptJson?.contentArchitecture || null,
     slots
   };
 }

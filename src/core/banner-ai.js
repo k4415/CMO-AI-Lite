@@ -1,12 +1,13 @@
+import crypto from "node:crypto";
 import { openAiJson } from "./openai-text.js";
 import { loadPrompt } from "./prompt-files.js";
 import { buildCopySlotPlan, copyBriefMeetsSlotRequirements, isBrandOrLogoText, normalizeSlotTexts, syncCanonicalFieldsFromSlots } from "./banner-copy-slots.js";
 import { buildInstructionPolicy, ruleIsExplicitlyOverridden } from "./banner-instruction-policy.js";
 import { buildBannerGenerationContract } from "./banner-generation-contract.js";
 import { hashCopyBrief } from "./banner-copy-hash.js";
+import { compileClosedTemplatePromptSeed } from "./banner-prompt-compiler.js";
 import {
   buildClosedStructureInstruction,
-  buildSelectedAssetOverrideInstruction,
   buildSelectedAssetOverridePolicy,
   buildTemplateStructureContract,
   enforceTemplateStructure
@@ -21,8 +22,11 @@ export async function generateBannerCreativeProposal({
   diversityGuidance = null,
   copyBrief = null,
   creativeHypothesis = null,
-  approvedClaimSnapshot = null
+  approvedClaimSnapshot = null,
+  jsonGenerator = openAiJson
 }) {
+  const audit = createPromptGenerationAudit();
+  try {
   const instructionPolicy = banner?.instructionPolicy || buildInstructionPolicy(
     [banner?.additionalInstruction, banner?.revisionInstruction].filter(Boolean).join("\n")
   );
@@ -46,26 +50,38 @@ export async function generateBannerCreativeProposal({
     throw new Error("copyBrief が未生成です。先にコピー開発を実行してください。");
   }
 
-  const runDesign = async (retryReason = "") => {
-    const parsed = await openAiJson({
-      system: BANNER_CREATOR_SYSTEM,
-      user: buildBannerDesignPrompt({
-        banner,
-        product: generationContext.product,
-        strategy: generationContext.strategy,
-        template,
-        specifiedRules: rules.specifiedRules,
-        instructionPolicy,
-        diversityGuidance,
-        copyBrief: lockedCopyBrief,
-        copySlotPlan,
-        generationContract,
-        creativeHypothesis,
-        approvedClaimSnapshot,
-        retryReason
-      })
+  const runDesign = async () => {
+    const userPrompt = buildBannerDesignPrompt({
+      banner,
+      product: generationContext.product,
+      strategy: generationContext.strategy,
+      template,
+      specifiedRules: rules.specifiedRules,
+      instructionPolicy,
+      diversityGuidance,
+      copyBrief: lockedCopyBrief,
+      copySlotPlan,
+      generationContract,
+      creativeHypothesis,
+      approvedClaimSnapshot
     });
-    return normalizeBannerProposal(parsed, {
+    audit.modelDesignCalls += 1;
+    audit.inputChars += BANNER_CREATOR_SYSTEM.length + userPrompt.length;
+    const callHash = sha256(`${BANNER_CREATOR_SYSTEM}\n${userPrompt}`);
+    audit.inputHashes.push(callHash);
+    const parsed = await jsonGenerator({
+      system: BANNER_CREATOR_SYSTEM,
+      user: userPrompt,
+      onAttempt: (event) => {
+        audit.httpAttempts.push({ ...event, designCall: audit.modelDesignCalls });
+      },
+      onResult: (event) => {
+        audit.outputChars += Number(event?.outputChars) || 0;
+        if (event?.model) audit.model = String(event.model);
+        audit.resultEvents.push({ ...event, modelDesignCall: audit.modelDesignCalls });
+      }
+    });
+    const normalized = normalizeBannerProposal(parsed, {
       banner,
       product: generationContext.product,
       strategy: generationContext.strategy,
@@ -79,17 +95,57 @@ export async function generateBannerCreativeProposal({
       creativeHypothesis,
       approvedClaimSnapshot
     });
+    const repaired = reapplyLockedSlotTexts(normalized, {
+      copyBrief: lockedCopyBrief,
+      copySlotPlan,
+      template
+    });
+    audit.deterministicRepairs.push(...repaired.repairs.map((repair) => `${repair.type}:${repair.slotId}`));
+    return repaired.proposal;
   };
 
-  let normalized = await runDesign();
-  if (lockedCopyBrief.mainHook && !zonesContainText(normalized.promptJson?.zones, lockedCopyBrief.mainHook)) {
-    normalized = await runDesign("mainHook が zones の text 要素に含まれていません。確定コピーを改変せず、mainHook を必ず主要テキストとして配置してください。");
-    if (!zonesContainText(normalized.promptJson?.zones, lockedCopyBrief.mainHook)) {
-      console.warn(`[CMOAI] banner ${banner?.id || ""}: mainHook missing from zones after retry; imageText remains authoritative.`);
-    }
-  }
+  const closedTemplate = buildTemplateStructureContract(template?.templateZones).closed;
+  const runDeterministicDesign = () => {
+    const parsed = compileClosedTemplatePromptSeed({
+      banner,
+      product: generationContext.product,
+      strategy: generationContext.strategy,
+      template,
+      copyBrief: lockedCopyBrief,
+      creativeHypothesis,
+      instructionPolicy
+    });
+    const serialized = JSON.stringify(parsed);
+    audit.model = "deterministic-template-compiler-v1";
+    audit.inputChars += serialized.length;
+    audit.outputChars += serialized.length;
+    audit.inputHashes.push(sha256(serialized));
+    const normalized = normalizeBannerProposal(parsed, {
+      banner,
+      product: generationContext.product,
+      strategy: generationContext.strategy,
+      template,
+      diversityGuidance,
+      copyBrief: lockedCopyBrief,
+      copySlotPlan,
+      specifiedRules: rules.specifiedRules,
+      instructionPolicy,
+      generationContract,
+      creativeHypothesis,
+      approvedClaimSnapshot
+    });
+    const repaired = reapplyLockedSlotTexts(normalized, {
+      copyBrief: lockedCopyBrief,
+      copySlotPlan,
+      template
+    });
+    audit.deterministicRepairs.push(...repaired.repairs.map((repair) => `${repair.type}:${repair.slotId}`));
+    return repaired.proposal;
+  };
 
-  return {
+  const normalized = closedTemplate ? runDeterministicDesign() : await runDesign();
+
+  const result = {
     ...applyRegulationRules(normalized, rules.ngRules, instructionPolicy),
     overriddenRules: rules.overriddenRules.map((rule) => ({
       ruleId: rule.id || "",
@@ -98,6 +154,110 @@ export async function generateBannerCreativeProposal({
       reason: "explicit_additional_instruction"
     }))
   };
+  result.promptGenerationAudit = finalizePromptGenerationAudit(audit, "completed");
+  return result;
+  } catch (error) {
+    error.promptGenerationAudit = finalizePromptGenerationAudit(audit, "failed", error);
+    throw error;
+  }
+}
+
+function createPromptGenerationAudit() {
+  return {
+    version: 1,
+    model: process.env.CMOAI_TEXT_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5",
+    startedAt: new Date().toISOString(),
+    outcome: "running",
+    inputChars: 0,
+    inputHashes: [],
+    inputHash: "",
+    outputChars: 0,
+    modelDesignCalls: 0,
+    httpAttempts: [],
+    resultEvents: [],
+    deterministicRepairs: []
+  };
+}
+
+function finalizePromptGenerationAudit(audit, outcome, error = null) {
+  return {
+    ...audit,
+    outcome,
+    inputHash: sha256(audit.inputHashes.join("\n")),
+    ...(outcome === "completed" ? { completedAt: new Date().toISOString() } : { failedAt: new Date().toISOString() }),
+    ...(error ? {
+      errorCode: String(error?.code || "PROMPT_GENERATION_FAILED"),
+      errorMessage: String(error?.message || error)
+    } : {})
+  };
+}
+
+function sha256(value) {
+  return `sha256:${crypto.createHash("sha256").update(String(value || "")).digest("hex")}`;
+}
+
+export function reapplyLockedSlotTexts(proposal, { copyBrief, copySlotPlan, template } = {}) {
+  const promptJson = proposal?.promptJson && typeof proposal.promptJson === "object" ? proposal.promptJson : {};
+  const zones = Array.isArray(promptJson.zones) ? promptJson.zones.map((zone) => ({
+    ...zone,
+    elements: Array.isArray(zone?.elements) ? zone.elements.map((element) => ({ ...element })) : []
+  })) : [];
+  const lockedSlots = normalizeSlotTexts(copyBrief?.slotTexts, copySlotPlan).filter((slot) => String(slot.text || "").trim());
+  const repairs = [];
+  const claimedElements = new Set();
+  const allTextElements = zones.flatMap((zone) => zone.elements || [])
+    .filter((element) => String(element?.type || "text").toLowerCase() === "text" && !isBrandOrLogoText(element));
+
+  for (const slot of lockedSlots) {
+    let element = allTextElements.find((candidate) => !claimedElements.has(candidate) && String(candidate.slotId || "") === slot.slotId);
+    let repairType = "locked_slot_reapplied";
+    if (!element) {
+      element = findBestUnlockedTextElement(allTextElements, claimedElements, slot);
+      repairType = "open_slot_rebound";
+    }
+    if (!element) {
+      if (buildTemplateStructureContract(template?.templateZones).closed) {
+        const error = new Error(`テンプレ構造内に確定コピースロットがありません: ${slot.slotId}`);
+        error.code = "PROMPT_TEMPLATE_SLOT_MISSING";
+        error.restartNode = "prompt";
+        throw error;
+      }
+      // Fallback mode may omit a slot, but it must never grow the model-proposed structure.
+      continue;
+    }
+    claimedElements.add(element);
+    const previousSlotId = String(element.slotId || "");
+    const previousContent = String(element.content || "");
+    element.slotId = slot.slotId;
+    element.content = slot.text;
+    if (previousSlotId !== slot.slotId || previousContent !== slot.text) {
+      repairs.push({ type: repairType, slotId: slot.slotId, previousSlotId });
+    }
+  }
+
+  const repairedPromptJson = { ...promptJson, zones };
+  const repairedProposal = {
+    ...proposal,
+    promptJson: repairedPromptJson,
+    promptText: buildPromptText(repairedPromptJson).trim()
+  };
+  return { proposal: repairedProposal, repairs };
+}
+
+function findBestUnlockedTextElement(elements, claimedElements, slot) {
+  const available = elements.filter((element) => !claimedElements.has(element));
+  const field = String(slot?.canonicalField || "").toLowerCase();
+  const roleMatch = available.find((element) => {
+    const roleText = `${element?.role || ""} ${element?.messageRole || ""}`.toLowerCase();
+    if (field === "mainhook") return /main|hero|headline|hook|primary|メイン|見出し/.test(roleText);
+    if (field === "subhook") return /sub|secondary|support|benefit|サブ|補足|便益/.test(roleText);
+    if (field === "proof") return /proof|evidence|reason|trust|根拠|証拠|実績/.test(roleText);
+    if (field === "offerbadge") return /offer|badge|オファー|特典|無料|割引/.test(roleText);
+    if (field === "cta") return /cta|button|action|ボタン|行動|申込|詳細/.test(roleText);
+    if (field === "disclaimer") return /note|disclaimer|注|免責/.test(roleText);
+    return false;
+  });
+  return roleMatch || available[0] || null;
 }
 
 export function prepareBannerGenerationContext(product = {}, strategy = {}) {
@@ -126,62 +286,33 @@ export function prepareBannerGenerationContext(product = {}, strategy = {}) {
 }
 
 export function buildBannerDesignPrompt({ banner, product, strategy, template, specifiedRules, instructionPolicy = null, diversityGuidance, copyBrief, copySlotPlan, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null, retryReason }) {
-  const templateStructureContract = buildTemplateStructureContract(template?.templateZones);
-  const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
-  const resolvedContract = stripTemplateDisplayMetadataFromContract(generationContract || buildBannerGenerationContract({
+  void generationContract;
+  void retryReason;
+  const stage2Input = buildBannerDesignInput({
     banner,
     product,
     strategy,
     template,
+    specifiedRules,
     instructionPolicy,
-    expressionRules: specifiedRules,
+    diversityGuidance,
+    copyBrief,
+    copySlotPlan,
     creativeHypothesis,
     approvedClaimSnapshot
-  }));
+  });
+  const templateStructureContract = stage2Input.templateStructureContract;
+  const selectedAssetPolicy = stage2Input.selectedAssetPolicy;
   return [
-    retryReason ? "# 前回出力の修正指示\n" + retryReason : "",
-    "# 実行対象",
-    JSON.stringify({
-      banner: summarizeBannerForPrompt(banner),
-      product: summarizeProductIdentity(product),
-      strategy,
-      template: summarizeTemplateForPrompt(template)
-    }, null, 2),
-    "",
-    "# 確定コピー（変更禁止）",
-    "以下の copyBrief は Stage 1 で確定済み。imageText と zones 内の text 要素は、ここにある文言だけを使うこと。語尾調整、要約、言い換えは禁止。改行位置の調整だけ許可する。",
-    JSON.stringify(copyBrief, null, 2),
-    "",
-    "# コピー枠プラン（配置の正）",
-    "zones内のtext要素は、このslotIdに対応するcopyBrief.slotTextsのtextだけを配置する。コピーの取捨選択・詰め替え・言い換えは禁止。",
-    JSON.stringify(summarizeCopySlotPlanForPrompt(copySlotPlan || buildCopySlotPlan(template)), null, 2),
-    "",
-    templateStructureContract.closed ? "# テンプレ構造契約（最優先・変更禁止）" : "",
+    "# Stage2Input",
+    "以下のJSONだけを入力の正として扱う。上流データ・旧テンプレ本文・表示用テンプレ名は参照しない。",
+    JSON.stringify(stage2Input),
     templateStructureContract.closed ? buildClosedStructureInstruction(templateStructureContract, selectedAssetPolicy) : "",
-    templateStructureContract.closed ? JSON.stringify(templateStructureContract, null, 2) : "",
-    selectedAssetPolicy.enabled ? "# ユーザー選択素材（テンプレ構造に対する唯一の例外）" : "",
-    selectedAssetPolicy.enabled ? buildSelectedAssetOverrideInstruction(selectedAssetPolicy) : "",
-    "# CreativeHypothesisContract（コピー開発前に確定済み・変更禁止）",
-    JSON.stringify(creativeHypothesis || {}, null, 2),
-    "",
-    "# ApprovedClaimSnapshot（参照のみ・変更禁止）",
-    JSON.stringify(approvedClaimSnapshot || {}, null, 2),
-    "",
-    "# BannerGenerationContract（Stage 1と共通・変更禁止）",
-    JSON.stringify(resolvedContract, null, 2),
-    "",
-    "# 追加指示（原文が最優先）",
-    "追加指示は生成モードへ置換せず、原文の意味をそのまま反映する。表現レギュレーションと競合する場合は追加指示を優先する。protectedFields は完全に維持する。",
-    JSON.stringify(instructionPolicy || buildInstructionPolicy([banner?.additionalInstruction, banner?.revisionInstruction].filter(Boolean).join("\n")), null, 2),
-    "",
-    "# 表現レギュレーションDB（指定ルールのみ。NGワード照合はシステム側で後処理）",
-    JSON.stringify((specifiedRules || []).slice(0, 40), null, 2),
-    "",
-    "# 画像サイズ",
-    `promptJson.basic.size は指定サイズ「${banner.imageSize || "1080x1080"}」(px, 幅x高さ)に固定される。ゾーン構成・要素配置はこのサイズの縦横比に合わせて設計すること。`,
-    "",
-    buildBannerDiversityInstruction(diversityGuidance),
-    "",
+    selectedAssetPolicy.enabled
+      ? "ユーザー選択素材だけを閉じた構造の唯一の例外とし、すべて必ず反映する。選択されていない素材を追加しない。"
+      : "",
+    "copyBrief.slotTextsは確定済み。zones内textは同じslotIdのtextを一字も変えずに配置し、新しいtext枠を増やさない。",
+    `promptJson.basic.sizeは「${stage2Input.banner.imageSize}」に固定する。`,
     "# 出力要件",
     strategy.sourceMode === "markdown"
       ? "戦略は strategy.markdown を唯一の正として解釈すること。旧構造化項目は入力から除外済みであり、本文からターゲット・欲求・便益・オファーを読み取ること。"
@@ -198,16 +329,62 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
   ].filter(Boolean).join("\n");
 }
 
+export function buildBannerDesignInput({ banner = {}, product = {}, strategy = {}, template = null, specifiedRules = [], instructionPolicy = null, diversityGuidance = null, copyBrief = null, copySlotPlan = null, creativeHypothesis = null, approvedClaimSnapshot = null } = {}) {
+  const resolvedSlotPlan = copySlotPlan || buildCopySlotPlan(template);
+  const templateStructureContract = buildTemplateStructureContract(template?.templateZones);
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
+  const resolvedInstructionPolicy = instructionPolicy || buildInstructionPolicy(
+    [banner?.additionalInstruction, banner?.revisionInstruction].filter(Boolean).join("\n")
+  );
+  return {
+    version: 1,
+    banner: {
+      id: String(banner?.id || ""),
+      imageSize: String(banner?.imageSize || "1080x1080")
+    },
+    productIdentity: summarizeProductIdentity(product),
+    strategy,
+    copyBrief: normalizeCopyBriefForDesign(copyBrief, strategy, resolvedSlotPlan),
+    copySlotPlan: summarizeCopySlotPlanForPrompt(resolvedSlotPlan),
+    templateId: String(template?.id || ""),
+    templateStructureContract,
+    selectedAssetPolicy,
+    instructionPolicy: resolvedInstructionPolicy,
+    creativeHypothesis: creativeHypothesis || {},
+    approvedClaimSnapshotRef: {
+      snapshotId: String(approvedClaimSnapshot?.snapshotId || ""),
+      contentHash: String(approvedClaimSnapshot?.contentHash || "")
+    },
+    expressionRules: (Array.isArray(specifiedRules) ? specifiedRules : []).slice(0, 40),
+    diversityReferences: compactDiversityReferences(diversityGuidance)
+  };
+}
+
+function compactDiversityReferences(guidance) {
+  if (!guidance || typeof guidance !== "object") return null;
+  return {
+    axisLabel: String(guidance.axisLabel || "").trim(),
+    axisInstruction: String(guidance.axisInstruction || "").trim(),
+    avoid: (Array.isArray(guidance.avoidCopies) ? guidance.avoidCopies : []).slice(-8).map((item) => ({
+      candidateIdentity: String(item?.candidateIdentity || item?.id || "").trim(),
+      variationAxis: String(item?.variationAxis || "").trim(),
+      mainHook: String(item?.mainHook || "").trim().slice(0, 120),
+      visualDirection: String(item?.visualDirection || "").trim().slice(0, 240)
+    }))
+  };
+}
+
 export function buildBannerDiversityInstruction(guidance) {
   if (!guidance || typeof guidance !== "object") return "";
   const previousVisuals = (Array.isArray(guidance.avoidCopies) ? guidance.avoidCopies : [])
     .map((item) => ({
-      title: String(item?.title || "").trim(),
+      candidateIdentity: String(item?.candidateIdentity || item?.id || "").trim(),
       variationAxis: String(item?.variationAxis || "").trim(),
-      visualDirection: String(item?.visualDirection || "").trim().slice(0, 500)
+      mainHook: String(item?.mainHook || "").trim().slice(0, 120),
+      visualDirection: String(item?.visualDirection || "").trim().slice(0, 240)
     }))
-    .filter((item) => item.visualDirection)
-    .slice(-12);
+    .filter((item) => item.visualDirection || item.mainHook || item.variationAxis)
+    .slice(-8);
   return [
     "# 複数案の視覚差別化要件",
     guidance.axisLabel ? `今回の訴求軸: ${guidance.axisLabel}` : "",
@@ -426,6 +603,7 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
     desire: String(promptJson.desire || strategy.desire || ""),
     benefit: String(promptJson.benefit || strategy.benefit || strategy.productConcept || ""),
     offer: String(promptJson.offer || strategy.offer || copyBrief.offerBadge || ""),
+    additionalInstruction: String(instructionPolicy?.rawInstruction || promptJson.additionalInstruction || ""),
     structureSheet,
     globalDesign: {
       style: String(globalDesign.style || templateDesign.style || promptJson.style || "direct response banner"),
@@ -455,6 +633,8 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
     copyBrief: {
       strategyId: copyBrief.strategyId || strategy.id || "",
       appealAxis: copyBrief.appealAxis || "",
+      variationDirection: copyBrief.variationDirection || "",
+      targetMoment: copyBrief.targetMoment || "",
       mainHook: copyBrief.mainHook || "",
       whyItStops: copyBrief.whyItStops || "",
       templateUseNote: copyBrief.templateUseNote || "",
@@ -514,6 +694,7 @@ function normalizeCopyBriefForDesign(value, strategy = {}, copySlotPlan = null) 
     generatedAt: String(source.generatedAt || "").trim(),
     model: String(source.model || "").trim(),
     appealAxis: String(source.appealAxis || "").trim(),
+    variationDirection: String(source.variationDirection || "").trim(),
     targetMoment: String(source.targetMoment || "").trim(),
     mainHook: String(canonicalFromSlots?.mainHook || source.mainHook || "").trim(),
     subHook: String(canonicalFromSlots?.subHook || source.subHook || "").trim(),
@@ -577,7 +758,6 @@ function normalizeZones(zones, copyBrief, copySlotPlan = null, product = {}) {
               normalized.targetChars = slot.charBudget || normalized.targetChars;
             } else {
               normalized.content = "";
-              console.warn(`[CMOAI] unmatched banner copy slot: ${normalized.slotId}`);
             }
           }
         } else {

@@ -36,16 +36,45 @@ test("diversity instruction includes axis and prior copy without unbounded histo
   assert.match(text, /同じ被写体・利用シーン/);
 });
 
+test("prompt claim without an explicit node infers copyplan and records its input ownership", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-banner-inferred-claim-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  const context = contractContext();
+  await fs.writeFile(path.join(projectRoot, "data", "products.json"), JSON.stringify(context.products));
+  await fs.writeFile(path.join(projectRoot, "data", "strategies.json"), JSON.stringify(context.strategies));
+  await fs.writeFile(path.join(projectRoot, "data", "expression-rules.json"), JSON.stringify(context.expressionRules));
+  const banner = await addBannerCreative(projectRoot, {
+    productId: "product-1",
+    strategyId: "strategy-1",
+    title: "初回API生成"
+  });
+
+  const claim = await claimBannerPromptGeneration(projectRoot, banner.id, {
+    ownerId: "test-server",
+    attemptId: "attempt-inferred",
+    leaseMs: 60000
+  });
+
+  assert.equal(claim.claimed, true);
+  assert.equal(claim.banner.pipelineNodes.copyplan.status, "running");
+  assert.equal(claim.banner.pipelineNodes.copyplan.attemptId, "attempt-inferred");
+  assert.match(claim.banner.pipelineNodes.copyplan.inputHash, /^sha256:/);
+});
+
 test("batch generation creates copyBriefs once and passes each brief to Stage 2", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-banner-diversity-"));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
   const base = { productId: "product-1", strategyId: "strategy-1", title: "案" };
-  const existing = await addBannerCreative(projectRoot, { ...base, title: "既存案" });
-  await updateBannerCreative(projectRoot, existing.id, {
-    imageText: "月3案件以上の広告運用に\nCPA改善をチームで回す",
-    copyBrief: brief("既存軸", "月3案件以上の広告運用に")
-  });
+  for (let index = 0; index < 12; index += 1) {
+    const existing = await addBannerCreative(projectRoot, { ...base, title: `既存案${index + 1}` });
+    await updateBannerCreative(projectRoot, existing.id, {
+      imageText: `月${index + 1}案件以上の広告運用に\nCPA改善をチームで回す`,
+      copyBrief: { ...brief(`既存軸${index + 1}`, `月${index + 1}案件以上の広告運用に`), proof: `長い根拠${index + 1}` },
+      promptJson: { globalDesign: { visualStyle: { type: "team workflow" } }, zones: [{ elements: [{ type: "image", role: `scene-${index + 1}` }] }] }
+    });
+  }
   const first = await addBannerCreative(projectRoot, { ...base, title: "新規案1" });
   const second = await addBannerCreative(projectRoot, { ...base, title: "新規案2" });
   const copyBriefCalls = [];
@@ -84,6 +113,9 @@ test("batch generation creates copyBriefs once and passes each brief to Stage 2"
   assert.equal(copyBriefCalls[0].banners.length, 2);
   assert.equal(Object.hasOwn(copyBriefCalls[0], "facts"), false);
   assert.equal(proposalCalls.length, 2);
+  assert.equal(proposalCalls[0].diversityGuidance.avoidCopies.length, 8);
+  assert.equal(proposalCalls[0].diversityGuidance.avoidCopies.every((item) => !Object.hasOwn(item, "copyBrief") && !Object.hasOwn(item, "proof")), true);
+  assert.equal(proposalCalls[0].diversityGuidance.avoidCopies.every((item) => Object.hasOwn(item, "candidateIdentity") && Object.hasOwn(item, "mainHook")), true);
   assert.equal(proposalCalls.every((call) => !Object.hasOwn(call, "facts")), true);
   assert.equal(generated.errors.length, 0);
   assert.notEqual(generated.banners[0].variationAxis, generated.banners[1].variationAxis);
@@ -588,6 +620,48 @@ test("v6フルバッチはStage Aを1回だけ実行し各案をStage Cへ渡す
   }
 });
 
+test("copyplan groupが完了した案は他groupを待たずonItemsReadyへ渡す", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-copy-group-stream-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  const context = contractContext();
+  context.strategies.push({ id: "strategy-slow", targetAttributes: "広告担当者", benefit: "慎重に制作する" });
+  await fs.writeFile(path.join(projectRoot, "data", "products.json"), JSON.stringify(context.products));
+  await fs.writeFile(path.join(projectRoot, "data", "strategies.json"), JSON.stringify(context.strategies));
+  await fs.writeFile(path.join(projectRoot, "data", "expression-rules.json"), JSON.stringify(context.expressionRules));
+  const fast = await addBannerCreative(projectRoot, { productId: "product-1", strategyId: "strategy-1", title: "fast" });
+  const slow = await addBannerCreative(projectRoot, { productId: "product-1", strategyId: "strategy-slow", title: "slow" });
+  let releaseSlow;
+  const slowGate = new Promise((resolve) => { releaseSlow = resolve; });
+  const emitted = [];
+  const preparation = ensureBannerCopyBriefsForPromptJobs(projectRoot, [
+    { bannerId: fast.id },
+    { bannerId: slow.id }
+  ], context, {
+    forceCopyBrief: true,
+    copyBriefGenerator: async ({ banners, strategy, approvedClaimSnapshot }) => {
+      if (strategy.id === "strategy-slow") await slowGate;
+      return copyResults(banners, [brief(strategy.id, `${strategy.id}のコピー`)], hypothesis(`hyp_${strategy.id}`, approvedClaimSnapshot));
+    },
+    onItemsReady: async (items) => {
+      emitted.push(items.map((item) => item.banner.id));
+    }
+  });
+
+  try {
+    const deadline = Date.now() + 500;
+    while (!emitted.length && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.deepEqual(emitted, [[fast.id]]);
+  } finally {
+    releaseSlow();
+  }
+  const result = await preparation;
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(emitted, [[fast.id], [slow.id]]);
+});
+
 test("copyplan失敗は全案failedでStage 2へ進まない", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-banner-hypothesis-partial-"));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
@@ -603,6 +677,12 @@ test("copyplan失敗は全案failedでStage 2へ進まない", async (t) => {
 
   assert.equal(result.errors.length, 2);
   assert.equal(result.banners.length, 0);
+  const stored = await listBannerCreatives(projectRoot);
+  for (const banner of stored) {
+    assert.equal(banner.pipelineNodes.copyplan.status, "failed");
+    assert.equal(banner.pipelineNodes.copyplan.errorCode, "COPYPLAN_FAILED");
+    assert.equal(banner.pipelineNodes.prompt.status, "pending");
+  }
 });
 
 test("copyplan warningはStage 2へ進む", async (t) => {

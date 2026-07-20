@@ -63,7 +63,7 @@ export function enforceTemplateStructure({ templateZones, generatedZones }) {
   const zones = sourceZones.map((sourceZone, zoneIndex) => ({
     name: `Zone ${zoneIndex + 1}`,
     position: sourceZone.position,
-    purpose: sourceZone.purpose,
+    purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
     background: String(modelZones[zoneIndex]?.background || ""),
     elements: sourceZone.elements.map((sourceElement, elementIndex) => {
       const match = generatedBySlotId.get(sourceElement.slotId);
@@ -132,7 +132,9 @@ export function buildSelectedAssetOverrideInstruction(policy) {
   return [
     "【最優先・ユーザー選択素材の例外】",
     "以下のユーザー選択素材だけを、閉じたテンプレ構造に対する唯一の例外として扱う。",
-    "選択された素材はすべて完成画像に必ず反映する。対応する既存image枠があれば優先して使う。",
+    "選択された素材はすべて完成画像に必ず反映し、各素材を完成画像内で1回だけ使用する。対応する既存image枠があれば優先して使う。",
+    "各素材は添付された原画像のまま使い、描き直さない。内部の文字・図形・色・縦横比・余白・輪郭を維持し、切り抜き、単色化、立体化、パッケージ化、カード化、モックアップ化をしない。",
+    "同じ素材を複製、反復、分割したり、別角度・別形状・類似物・派生ビジュアルとして生成したりしない。",
     "対応枠がない、役割が異なる、または枠数が不足する場合も、選択素材に限って視線順と可読性を壊さない最小限の配置追加・置換を許可する。",
     "選択されていない素材は追加しない。選択されていないロゴ・商品画像・参考素材を追加・生成しない。",
     "選択素材を理由に、別の人物・写真・イラスト・端末・図解・アイコン・カード・バッジ・下線・背景モチーフを増やさない。",
@@ -186,20 +188,35 @@ function normalizeTemplateZones(templateZones) {
 function projectElement(source, generated = {}) {
   const type = source.type;
   const generatedContent = String(generated?.content || generated?.description || "");
+  const projectedShape = type === "shape" ? projectShapeSurface(source, generatedContent, generated?.effect) : null;
   return {
     type,
     slotId: source.slotId,
     role: source.role,
     messageRole: source.messageRole,
-    content: type === "shape" ? source.content : generatedContent,
+    content: type === "shape" ? projectedShape.content : generatedContent,
     position: clonePlainObject(source.position),
     size: source.size,
     font: type === "text" ? String(generated?.font || "") : "",
     color: type === "text" ? String(generated?.color || "") : "",
-    effect: source.effect,
+    effect: type === "shape" ? projectedShape.effect : source.effect,
     targetChars: source.targetChars,
     sourceReason: String(generated?.sourceReason || ""),
     templateReuseLevel: "closed-structure"
+  };
+}
+
+function projectShapeSurface(source, generatedContent, generatedEffect) {
+  const generated = `${generatedContent || ""} ${generatedEffect || ""}`;
+  const accent = generated.match(/色は\s*([^\s。;\n]+)/)?.[1]?.trim() || "";
+  if (!accent) return { content: source.content, effect: source.effect };
+  const stripColor = (value) => String(value || "")
+    .replace(/(?:ゴールド|金色|黄色|イエロー|オレンジ|橙色|赤色?|レッド|青色?|ブルー|シアン|水色|緑色?|グリーン|紫色?|パープル|ピンク|桃色|黒色?|ブラック|白色?|ホワイト|グレー|灰色)の?/gi, "")
+    .replace(/の{2,}/g, "の")
+    .trim();
+  return {
+    content: `${stripColor(source.content)}。色は${accent}`,
+    effect: source.effect ? `${stripColor(source.effect)}。色は${accent}` : ""
   };
 }
 

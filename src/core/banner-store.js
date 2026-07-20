@@ -8,6 +8,7 @@ import { buildCopySlotPlan, copyBriefMeetsSlotRequirements, findSlotLengthViolat
 import { buildApprovedClaimSnapshot } from "./banner-approved-claims.js";
 import { buildInstructionPolicy, createLockedContentSnapshot } from "./banner-instruction-policy.js";
 import { assertTemplateReadyForGeneration } from "./banner-generation-contract.js";
+import { classifyAbandonedLease } from "./banner-job-recovery.js";
 import { listAdTemplates } from "./ad-template-store.js";
 import { listStrategies } from "./strategy-store.js";
 import {
@@ -22,6 +23,13 @@ import {
 } from "./banner-pipeline-state.js";
 
 const BANNERS_PATH = "data/banner-creatives.json";
+const JOB_RECOVERY_ACTIONS = new Set([
+  "image_requeued",
+  "image_reset_for_manual_retry",
+  "edit_reset_preserving_output",
+  "prompt_reset_for_manual_retry",
+  "completed_output_preserved"
+]);
 export async function ensureBannerData(projectRoot) {
   const target = path.join(projectRoot, BANNERS_PATH);
   if (await pathExists(target)) return;
@@ -239,6 +247,7 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
   }
 
   const executeGroup = async (group) => {
+    const groupReady = [];
     const copyStartedAt = new Date().toISOString();
     const copyStartMs = Date.now();
     try {
@@ -250,7 +259,7 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
       const copyBriefGenerator = options.copyBriefGenerator || generateBannerCopyPlan;
       const preflight = await prepareCopyplanGroupContext(projectRoot, group.items, { product, strategy, template });
       errors.push(...preflight.errors);
-      if (!preflight.items.length) return;
+      if (!preflight.items.length) return groupReady;
       const baselineSeed = findBaselineSeedForCopyGroup(group.items, options.allBanners || []);
       const generated = await copyBriefGenerator({
         banners: preflight.items.map((item) => item.banner),
@@ -320,12 +329,16 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
             durationMs: copyDurationMs
           });
           const updated = await updateBannerForPromptAttempt(projectRoot, current.banner.id, current.attemptId, acceptedPatch);
-          ready.push({ ...current, banner: updated });
+          const readyItem = { ...current, banner: updated };
+          ready.push(readyItem);
+          groupReady.push(readyItem);
         }
       }
     } catch (error) {
+      if (!error.code) error.code = "COPYPLAN_FAILED";
+      if (!error.restartNode) error.restartNode = "copyplan";
       for (const current of group.items) {
-        errors.push({ bannerId: current.banner.id, code: error.code || "COPYPLAN_FAILED", message: error.message });
+        errors.push({ bannerId: current.banner.id, code: error.code, message: error.message });
         const failedPatch = {
           productionStatus: productionStatusForPipelineError(error),
           ...(current.attemptId ? { promptGenerationLease: null } : {}),
@@ -338,9 +351,24 @@ async function prepareCopyBriefsForPromptItems(projectRoot, items, context = {},
         }).catch(() => null);
       }
     }
+    return groupReady;
   };
   const runCopyGroup = typeof options.runCopyGroup === "function" ? options.runCopyGroup : (task) => task();
-  await Promise.all(groups.map((group) => runCopyGroup(() => executeGroup(group))));
+  const emitReady = async (readyItems) => {
+    if (!readyItems.length || typeof options.onItemsReady !== "function") return;
+    await options.onItemsReady(readyItems);
+  };
+  const dispatches = [];
+  if (ready.length) dispatches.push(Promise.resolve().then(() => emitReady([...ready])));
+  for (const group of groups) {
+    dispatches.push((async () => {
+      // runCopyGroupが共有workerを使う場合、slotを解放してから次工程をenqueueする。
+      // 10 group同時実行時のnested-pool deadlockを避けるため、この順序を維持する。
+      const groupReady = await runCopyGroup(() => executeGroup(group));
+      await emitReady(groupReady || []);
+    })());
+  }
+  await Promise.all(dispatches);
   return { items: ready, errors };
 }
 
@@ -570,13 +598,13 @@ function summarizeExistingCopies(banners, targetBanners) {
       && (!strategyId || item.strategyId === strategyId)
       && (!productId || item.productId === productId)
       && (item.imageText || item.copyBrief))
-    .slice(0, 20)
+    .slice(0, 8)
     .map((item) => ({
-      id: item.id,
-      title: item.title || "",
+      candidateIdentity: item.candidateGroupId
+        ? `${item.candidateGroupId}:${item.candidateIndex ?? ""}`
+        : item.id,
       variationAxis: item.copyBrief?.appealAxis || item.variationAxis || "",
-      copyBrief: item.copyBrief || null,
-      imageText: summarizeCopyBriefText(item.copyBrief, item.imageText),
+      mainHook: clean(item.copyBrief?.mainHook) || summarizeCopyBriefText(item.copyBrief, item.imageText).split("\n")[0] || "",
       visualDirection: summarizeVisualDirection(item.promptJson)
     }));
 }
@@ -662,6 +690,9 @@ async function generateBannerPromptWithGuidance(projectRoot, banner, context, gu
       reviewChecklist: proposal.promptJson?.reviewChecklist || null,
       selectionReason: proposal.selectionReason || "",
       bannerGenerationContract: proposal.bannerGenerationContract || banner.bannerGenerationContract || null,
+      promptGenerationAudit: proposal.promptGenerationAudit && typeof proposal.promptGenerationAudit === "object"
+        ? proposal.promptGenerationAudit
+        : null,
       creativeHypothesis: banner.creativeHypothesis || null,
       visualHypothesisRef: proposal.visualHypothesisRef || null,
       diversityReview: {
@@ -689,6 +720,9 @@ async function generateBannerPromptWithGuidance(projectRoot, banner, context, gu
       lastError: error.message,
       lastErrorAt: new Date().toISOString()
     };
+    if (error?.promptGenerationAudit && typeof error.promptGenerationAudit === "object") {
+      failedPatch.promptGenerationAudit = error.promptGenerationAudit;
+    }
     failedPatch.pipelineNodes = markFailedPipelineNode(banner, error, attemptId);
     await updateBannerForPromptAttempt(projectRoot, banner.id, attemptId, failedPatch);
     throw error;
@@ -958,27 +992,42 @@ async function updateBannerCreativeForAttempt(
 
 export async function claimBannerPromptGeneration(projectRoot, bannerId, claim) {
   await ensureBannerData(projectRoot);
+  const requestedStartNode = ["copyplan", "prompt"].includes(claim.startNode) ? claim.startNode : "";
+  const inferenceWorkspace = requestedStartNode ? null : await loadFreshBannerPipelineWorkspace(projectRoot);
   return withFileLock(path.join(projectRoot, BANNERS_PATH), async () => {
     const banners = await readJson(projectRoot, BANNERS_PATH);
     const index = banners.findIndex((item) => item.id === bannerId);
     if (index < 0) throw new Error(`バナーが見つかりません: ${bannerId}`);
-    const current = banners[index];
+    const current = normalizeBanner(banners[index]);
     const now = Date.now();
     const lease = current.promptGenerationLease && typeof current.promptGenerationLease === "object" ? current.promptGenerationLease : null;
     const expiresAt = Date.parse(lease?.expiresAt || "");
     if (lease && Number.isFinite(expiresAt) && expiresAt > now) return { claimed: false, banner: current, reason: "active" };
     const leaseMs = Math.max(60000, Number(claim.leaseMs) || 5 * 60 * 1000);
     const queuedAt = new Date(now).toISOString();
-    const startNode = ["copyplan", "prompt"].includes(claim.startNode) ? claim.startNode : "";
-    const pipelineNodes = startNode
-      ? markPipelineNode(current.pipelineNodes, startNode, {
-          status: "running",
-          inputHash: clean(claim.inputHash),
-          outputHash: "",
-          attemptId: clean(claim.attemptId),
-          retryExhausted: false
-        })
-      : current.pipelineNodes;
+    let startNode = requestedStartNode;
+    let inputHash = clean(claim.inputHash);
+    let basePipelineNodes = current.pipelineNodes;
+    if (!startNode) {
+      const runtimeContext = buildBannerPipelineContext(current, inferenceWorkspace || {});
+      const expectedInputHashes = buildPipelineInputHashes(runtimeContext);
+      const currentOutputHashes = buildPipelineOutputHashes(runtimeContext);
+      basePipelineNodes = reconcilePipelineState(current.pipelineNodes, expectedInputHashes, currentOutputHashes);
+      startNode = nextPipelineNode({ ...current, pipelineNodes: basePipelineNodes }, expectedInputHashes, currentOutputHashes);
+      inputHash = clean(expectedInputHashes[startNode]);
+    }
+    if (!["copyplan", "prompt"].includes(startNode)) {
+      return { claimed: false, banner: current, reason: "prompt_not_needed" };
+    }
+    const pipelineNodes = markPipelineNode(basePipelineNodes, startNode, {
+      status: "running",
+      inputHash,
+      outputHash: "",
+      attemptId: clean(claim.attemptId),
+      errorCode: "",
+      errorMessage: "",
+      retryExhausted: false
+    });
     banners[index] = normalizeBanner({
       ...current,
       pipelineNodes,
@@ -1055,6 +1104,253 @@ export async function completeBannerPromptOperation(projectRoot, bannerId, attem
     lastError: "",
     lastErrorAt: ""
   }, "PROMPT_ATTEMPT_REPLACED");
+}
+
+export async function recoverAbandonedBannerJobs(projectRoot, options = {}) {
+  await ensureBannerData(projectRoot);
+  const nowMs = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const ownerId = clean(options.ownerId);
+  const leaseMs = Math.max(60000, Number(options.leaseMs) || 15 * 60 * 1000);
+  const attemptIdFactory = typeof options.attemptIdFactory === "function"
+    ? options.attemptIdFactory
+    : () => crypto.randomUUID();
+  const result = {
+    imageJobs: [],
+    resetPromptIds: [],
+    resetEditIds: [],
+    manualImageIds: [],
+    completedImageIds: []
+  };
+
+  return withFileLock(path.join(projectRoot, BANNERS_PATH), async () => {
+    const banners = await readJson(projectRoot, BANNERS_PATH);
+    let changed = false;
+
+    for (let index = 0; index < banners.length; index += 1) {
+      let current = normalizeBanner(banners[index]);
+      const promptLease = current.promptGenerationLease;
+      const promptState = classifyAbandonedLease(promptLease, {
+        now: nowMs,
+        signalProcess: options.signalProcess
+      });
+      if (promptState.abandoned) {
+        const attemptId = clean(promptLease?.attemptId);
+        const state = normalizePipelineState(current.pipelineNodes);
+        const interruptedNode = ["copyplan", "prompt"].find((node) => (
+          state[node].status === "running" && (!attemptId || state[node].attemptId === attemptId)
+        )) || "prompt";
+        const previousNode = state[interruptedNode];
+        const pipelineNodes = markPipelineNode(current.pipelineNodes, interruptedNode, {
+          status: "failed",
+          attemptId,
+          inputHash: previousNode.inputHash,
+          outputHash: previousNode.outputHash,
+          errorCode: "SERVER_RESTART_INTERRUPTED",
+          errorMessage: "サーバー再起動によりコピー生成が中断されました。再生成してください。",
+          completedAt: nowIso,
+          retryExhausted: false
+        });
+        current = normalizeBanner({
+          ...current,
+          pipelineNodes,
+          productionStatus: "failed",
+          promptGenerationLease: null,
+          lastError: "サーバー再起動によりコピー生成が中断されました。再生成してください。",
+          lastErrorAt: nowIso,
+          jobRecoveryAudit: buildJobRecoveryAudit(current.jobRecoveryAudit, {
+            lastAction: "prompt_reset_for_manual_retry",
+            lastReason: promptState.reason,
+            lastRecoveredAt: nowIso,
+            sourceOwnerId: promptLease?.ownerId,
+            sourceAttemptId: attemptId,
+            recoveredAttemptId: ""
+          }),
+          updatedAt: nowIso
+        });
+        result.resetPromptIds.push(current.id);
+        changed = true;
+      }
+
+      const imageLease = current.imageGenerationLease;
+      const imageState = classifyAbandonedLease(imageLease, {
+        now: nowMs,
+        signalProcess: options.signalProcess
+      });
+      if (imageState.abandoned) {
+        const sourceAttemptId = clean(imageLease?.attemptId);
+        const sourceOwnerId = clean(imageLease?.ownerId);
+        const imageNode = normalizePipelineState(current.pipelineNodes).image;
+        const operationKind = imageLease?.operationKind === "edit" ? "edit" : "generate";
+        const existingAudit = normalizeJobRecoveryAudit(current.jobRecoveryAudit);
+
+        if (operationKind === "edit") {
+          const outputHash = buildPipelineOutputHashes({ banner: current }).image || imageNode.outputHash;
+          const hasImage = Boolean(current.generatedImagePath);
+          current = normalizeBanner({
+            ...current,
+            imageGenerationStatus: hasImage ? "completed" : "failed",
+            imageGenerationLease: null,
+            pipelineNodes: markPipelineNode(current.pipelineNodes, "image", {
+              status: hasImage ? "completed" : "failed",
+              inputHash: imageNode.inputHash,
+              outputHash: hasImage ? outputHash : "",
+              attemptId: sourceAttemptId,
+              errorCode: hasImage ? "" : "SERVER_RESTART_INTERRUPTED",
+              errorMessage: hasImage ? "" : "サーバー再起動により画像修正が中断されました。",
+              completedAt: nowIso,
+              retryExhausted: false
+            }),
+            lastImageEditMode: imageLease?.editMode === "full" ? "full" : "range",
+            lastImageEditError: "サーバー再起動により画像修正が中断されました。もう一度修正してください。",
+            lastImageEditErrorAt: nowIso,
+            jobRecoveryAudit: buildJobRecoveryAudit(existingAudit, {
+              lastAction: "edit_reset_preserving_output",
+              lastReason: imageState.reason,
+              lastRecoveredAt: nowIso,
+              sourceOwnerId,
+              sourceAttemptId,
+              recoveredAttemptId: ""
+            }),
+            updatedAt: nowIso
+          });
+          result.resetEditIds.push(current.id);
+          changed = true;
+        } else if (current.generatedImagePath && current.generatedImageHash) {
+          const outputHash = buildPipelineOutputHashes({ banner: current }).image;
+          current = normalizeBanner({
+            ...current,
+            productionStatus: ["completed", "completed_with_warnings"].includes(current.productionStatus)
+              ? current.productionStatus
+              : "completed",
+            imageGenerationStatus: "completed",
+            imageGenerationLease: null,
+            pipelineNodes: markPipelineNode(current.pipelineNodes, "image", {
+              status: "completed",
+              inputHash: imageNode.inputHash,
+              outputHash,
+              attemptId: sourceAttemptId,
+              errorCode: "",
+              errorMessage: "",
+              completedAt: nowIso,
+              retryExhausted: false
+            }),
+            jobRecoveryAudit: buildJobRecoveryAudit(existingAudit, {
+              lastAction: "completed_output_preserved",
+              lastReason: imageState.reason,
+              lastRecoveredAt: nowIso,
+              sourceOwnerId,
+              sourceAttemptId,
+              recoveredAttemptId: ""
+            }),
+            updatedAt: nowIso
+          });
+          result.completedImageIds.push(current.id);
+          changed = true;
+        } else if ((existingAudit?.automaticImageRetryCount || 0) >= 1) {
+          current = resetImageForManualRetry(current, {
+            nowIso,
+            reason: imageState.reason,
+            sourceOwnerId,
+            sourceAttemptId,
+            errorCode: "SERVER_RESTART_RETRY_EXHAUSTED",
+            errorMessage: "サーバー再起動後の自動再実行も中断されました。再生成してください。"
+          });
+          result.manualImageIds.push(current.id);
+          changed = true;
+        } else {
+          const recoveredAttemptId = clean(attemptIdFactory());
+          if (!recoveredAttemptId) throw new Error("復旧用attemptIdを生成できませんでした。");
+          const inputHash = clean(imageNode.inputHash);
+          const pipelineNodes = markPipelineNode(current.pipelineNodes, "image", {
+            status: "running",
+            inputHash,
+            outputHash: "",
+            attemptId: recoveredAttemptId,
+            errorCode: "",
+            errorMessage: "",
+            startedAt: "",
+            completedAt: "",
+            durationMs: 0,
+            retryExhausted: false
+          });
+          current = normalizeBanner({
+            ...current,
+            pipelineNodes,
+            imageGenerationStatus: "queued",
+            imageGenerationLease: {
+              ownerId,
+              attemptId: recoveredAttemptId,
+              operationKind: "generate",
+              state: "queued",
+              queuedAt: nowIso,
+              heartbeatAt: nowIso,
+              expiresAt: new Date(nowMs + leaseMs).toISOString(),
+              recoveryRetryCounted: false
+            },
+            lastError: "",
+            lastErrorAt: "",
+            jobRecoveryAudit: buildJobRecoveryAudit(existingAudit, {
+              lastAction: "image_requeued",
+              lastReason: imageState.reason,
+              lastRecoveredAt: nowIso,
+              sourceOwnerId,
+              sourceAttemptId,
+              recoveredAttemptId
+            }),
+            updatedAt: nowIso
+          });
+          result.imageJobs.push({
+            bannerId: current.id,
+            attemptId: recoveredAttemptId,
+            inputHash,
+            previousAttemptId: sourceAttemptId,
+            reason: imageState.reason
+          });
+          changed = true;
+        }
+      }
+
+      if (changed || current !== banners[index]) banners[index] = current;
+    }
+
+    if (changed) await writeJson(projectRoot, BANNERS_PATH, banners);
+    return result;
+  });
+}
+
+export async function resetRecoveredBannerImageForManualRetry(
+  projectRoot,
+  bannerId,
+  attemptId,
+  reason = "pipeline_input_changed"
+) {
+  await ensureBannerData(projectRoot);
+  return withFileLock(path.join(projectRoot, BANNERS_PATH), async () => {
+    const banners = await readJson(projectRoot, BANNERS_PATH);
+    const index = banners.findIndex((item) => item.id === bannerId);
+    if (index < 0) throw new Error(`バナーが見つかりません: ${bannerId}`);
+    const current = normalizeBanner(banners[index]);
+    if (current.imageGenerationLease?.attemptId !== attemptId) return null;
+
+    const nowIso = new Date().toISOString();
+    const audit = normalizeJobRecoveryAudit(current.jobRecoveryAudit);
+    const message = reason === "pipeline_input_changed"
+      ? "再起動中に画像生成の入力が変更されました。内容を確認して再生成してください。"
+      : "再起動後の画像生成を再開できませんでした。再生成してください。";
+    banners[index] = resetImageForManualRetry(current, {
+      nowIso,
+      reason,
+      sourceOwnerId: audit?.sourceOwnerId || current.imageGenerationLease?.ownerId,
+      sourceAttemptId: audit?.sourceAttemptId || attemptId,
+      errorCode: reason === "pipeline_input_changed"
+        ? "SERVER_RESTART_INPUT_CHANGED"
+        : "SERVER_RESTART_RECOVERY_FAILED",
+      errorMessage: message
+    });
+    await writeJson(projectRoot, BANNERS_PATH, banners);
+    return banners[index];
+  });
 }
 
 export async function claimBannerImageOperation(projectRoot, bannerId, claim, options = {}) {
@@ -1145,17 +1441,39 @@ export async function startBannerImageGeneration(projectRoot, bannerId, attemptI
       throw error;
     }
     const now = new Date();
+    const nowIso = now.toISOString();
+    const recoveryAudit = normalizeJobRecoveryAudit(current.jobRecoveryAudit);
+    const countRecoveredRetry = Boolean(
+      recoveryAudit
+      && recoveryAudit.lastAction === "image_requeued"
+      && recoveryAudit.recoveredAttemptId === attemptId
+      && current.imageGenerationLease?.recoveryRetryCounted !== true
+    );
+    const pipelineNodes = markPipelineNode(current.pipelineNodes, "image", {
+      status: "running",
+      attemptId,
+      startedAt: nowIso,
+      completedAt: "",
+      durationMs: 0,
+      errorCode: "",
+      errorMessage: ""
+    });
     banners[index] = normalizeBanner({
       ...current,
+      pipelineNodes,
       imageGenerationStatus: "generating",
       imageGenerationLease: {
         ...current.imageGenerationLease,
         state: "generating",
-        startedAt: now.toISOString(),
-        heartbeatAt: now.toISOString(),
+        ...(countRecoveredRetry ? { recoveryRetryCounted: true } : {}),
+        startedAt: nowIso,
+        heartbeatAt: nowIso,
         expiresAt: new Date(now.getTime() + Math.max(60000, Number(leaseMs) || 12 * 60 * 1000)).toISOString()
       },
-      updatedAt: now.toISOString()
+      jobRecoveryAudit: countRecoveredRetry
+        ? { ...recoveryAudit, automaticImageRetryCount: recoveryAudit.automaticImageRetryCount + 1 }
+        : recoveryAudit,
+      updatedAt: nowIso
     });
     await writeJson(projectRoot, BANNERS_PATH, banners);
     return banners[index];
@@ -1197,6 +1515,8 @@ export async function failBannerImageGeneration(projectRoot, bannerId, attemptId
     }
     const now = new Date().toISOString();
     const imageNode = normalizePipelineState(current.pipelineNodes).image;
+    const startedMs = Date.parse(imageNode.startedAt || "");
+    const completedMs = Date.parse(now);
     const pipelineNodes = markPipelineNode(current.pipelineNodes, "image", {
       status: "failed",
       attemptId: clean(attemptId),
@@ -1204,6 +1524,8 @@ export async function failBannerImageGeneration(projectRoot, bannerId, attemptId
       outputHash: "",
       errorCode: "IMAGE_GENERATION_FAILED",
       errorMessage: clean(errorMessage) || "画像生成に失敗しました。",
+      completedAt: now,
+      durationMs: Number.isFinite(startedMs) ? Math.max(0, completedMs - startedMs) : 0,
       retryCount: imageNode.errorCode === "IMAGE_GENERATION_FAILED" ? imageNode.retryCount + 1 : 0,
       retryExhausted: imageNode.errorCode === "IMAGE_GENERATION_FAILED" && imageNode.retryCount >= 0
     });
@@ -1353,6 +1675,9 @@ export async function completeBannerImageGeneration(projectRoot, bannerId, attem
       throw error;
     }
     const imageNode = normalizePipelineState(current.pipelineNodes).image;
+    const completedAt = new Date().toISOString();
+    const startedMs = Date.parse(imageNode.startedAt || "");
+    const completedMs = Date.parse(completedAt);
     merged.pipelineNodes = markPipelineNode(current.pipelineNodes, "image", {
       status: "completed",
       inputHash: imageNode.inputHash,
@@ -1360,6 +1685,8 @@ export async function completeBannerImageGeneration(projectRoot, bannerId, attem
       attemptId,
       errorCode: "",
       errorMessage: "",
+      completedAt,
+      durationMs: Number.isFinite(startedMs) ? Math.max(0, completedMs - startedMs) : 0,
       retryCount: 0,
       retryExhausted: false
     });
@@ -1495,7 +1822,9 @@ function normalizeBanner(input) {
     imageGenerationStatus: clean(input.imageGenerationStatus) || "not_started",
     imageGenerationLease: input.imageGenerationLease && typeof input.imageGenerationLease === "object" ? input.imageGenerationLease : null,
     imageGenerationAudit: input.imageGenerationAudit && typeof input.imageGenerationAudit === "object" ? input.imageGenerationAudit : null,
+    promptGenerationAudit: input.promptGenerationAudit && typeof input.promptGenerationAudit === "object" ? input.promptGenerationAudit : null,
     promptGenerationLease: input.promptGenerationLease && typeof input.promptGenerationLease === "object" ? input.promptGenerationLease : null,
+    jobRecoveryAudit: normalizeJobRecoveryAudit(input.jobRecoveryAudit),
     lastError: clean(input.lastError),
     lastErrorAt: clean(input.lastErrorAt),
     provider: clean(input.provider),
@@ -1504,6 +1833,65 @@ function normalizeBanner(input) {
     createdAt: input.createdAt,
     updatedAt: input.updatedAt
   };
+}
+
+function normalizeJobRecoveryAudit(value) {
+  if (!value || typeof value !== "object") return null;
+  const lastAction = clean(value.lastAction);
+  return {
+    version: 1,
+    automaticImageRetryCount: Math.max(0, Math.trunc(Number(value.automaticImageRetryCount) || 0)),
+    lastAction: JOB_RECOVERY_ACTIONS.has(lastAction) ? lastAction : "",
+    lastReason: clean(value.lastReason),
+    lastRecoveredAt: clean(value.lastRecoveredAt),
+    sourceOwnerId: clean(value.sourceOwnerId),
+    sourceAttemptId: clean(value.sourceAttemptId),
+    recoveredAttemptId: clean(value.recoveredAttemptId)
+  };
+}
+
+function buildJobRecoveryAudit(existing, patch) {
+  return normalizeJobRecoveryAudit({
+    ...(normalizeJobRecoveryAudit(existing) || { automaticImageRetryCount: 0 }),
+    ...patch
+  });
+}
+
+function resetImageForManualRetry(current, {
+  nowIso,
+  reason,
+  sourceOwnerId,
+  sourceAttemptId,
+  errorCode,
+  errorMessage
+}) {
+  const imageNode = normalizePipelineState(current.pipelineNodes).image;
+  return normalizeBanner({
+    ...current,
+    imageGenerationStatus: "failed",
+    imageGenerationLease: null,
+    pipelineNodes: markPipelineNode(current.pipelineNodes, "image", {
+      status: "failed",
+      inputHash: imageNode.inputHash,
+      outputHash: "",
+      attemptId: sourceAttemptId,
+      errorCode,
+      errorMessage,
+      completedAt: nowIso,
+      retryExhausted: false
+    }),
+    lastError: errorMessage,
+    lastErrorAt: nowIso,
+    jobRecoveryAudit: buildJobRecoveryAudit(current.jobRecoveryAudit, {
+      lastAction: "image_reset_for_manual_retry",
+      lastReason: reason,
+      lastRecoveredAt: nowIso,
+      sourceOwnerId,
+      sourceAttemptId,
+      recoveredAttemptId: ""
+    }),
+    updatedAt: nowIso
+  });
 }
 
 function buildLockedCopyLengthReview(copyBrief) {

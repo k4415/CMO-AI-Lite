@@ -12,7 +12,7 @@ import {
 } from "../src/core/banner-copy-ai.js";
 import { charBudgetBounds, findSlotLengthViolations } from "../src/core/banner-copy-slots.js";
 
-test("near prompt omits original text and surface pattern while far includes pattern only", () => {
+test("構造利用では距離判定にかかわらず元広告のコピー意味・パターンを渡さない", () => {
   const template = {
     id: "tpl_1",
     title: "自己流ケアで満足していませんか？",
@@ -34,9 +34,11 @@ test("near prompt omits original text and surface pattern while far includes pat
   const far = JSON.stringify(buildTemplateCopyInput(template, { reuseMethod: "pattern_fill" }));
 
   assert.doesNotMatch(near, /自己流ケア|満足していませんか/);
-  assert.match(near, /現状不満を自覚させる/);
+  assert.doesNotMatch(near, /現状不満を自覚させる/);
   assert.doesNotMatch(far, /自己流ケア/);
-  assert.match(far, /\{他の解決策\}で満足していませんか/);
+  assert.doesNotMatch(far, /\{他の解決策\}で満足していませんか/);
+  assert.match(near, /"slotId":"z1e1"/);
+  assert.match(far, /"charBudget":18/);
 });
 
 test("copyBrief normalization attaches metadata without inventing copy", () => {
@@ -315,7 +317,7 @@ test("copy promptは別セクションにある戦略・テンプレ・指示・
   assert.equal(occurrences(repeatedHypothesis), 1);
   assert.equal(occurrences(repeatedRule), 1);
   assert.equal(occurrences(repeatedStrategy), 1);
-  assert.equal(occurrences(repeatedTemplate), 1);
+  assert.equal(occurrences(repeatedTemplate), 0);
   assert.equal(occurrences(repeatedInstruction), 1);
   assert.match(prompt, /approvedClaimSnapshotRef/);
   assert.match(prompt, /creativeHypothesisRef/);

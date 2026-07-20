@@ -8,7 +8,8 @@ import { createProject, listProjectCollections, listProjects, updateProjectStatu
 import { addExpressionRule, addFact, addMaterial, addProduct, addProductImage, deleteExpressionRule, deleteFact, deleteMaterial, deleteProduct, extractMaterial, extractTextFromUrl, getBannerGenerationWorkspace, getBannerImageContext, getResearchWorkspace, removeProductImage, updateExpressionRule, updateFact, updateMaterial, updateProduct } from "./core/research-store.js";
 import { addStrategy, deleteStrategy, updateStrategy } from "./core/strategy-store.js";
 import { extractTextFromFile } from "./core/file-import.js";
-import { addBannerCreative, claimBannerImageEdit, claimBannerImageGeneration, claimBannerPromptGeneration, completeBannerPromptOperation, deleteBannerCreative, ensureBannerCopyBriefsForPromptJobs, failBannerImageEdit, failBannerImageGeneration, failBannerPromptGeneration, generateBannerPromptBatch, listBannerCreatives, reconcileBannerPipeline, releaseBannerPromptGeneration, renewBannerImageGenerationLease, renewBannerPromptGenerationLease, reviseBannerCreative, spreadBannerIdeas, startBannerImageGeneration, updateBannerCreative } from "./core/banner-store.js";
+import { addBannerCreative, claimBannerImageEdit, claimBannerImageGeneration, claimBannerPromptGeneration, completeBannerPromptOperation, deleteBannerCreative, ensureBannerCopyBriefsForPromptJobs, failBannerImageEdit, failBannerImageGeneration, failBannerPromptGeneration, generateBannerPromptBatch, listBannerCreatives, reconcileBannerPipeline, recoverAbandonedBannerJobs, releaseBannerPromptGeneration, renewBannerImageGenerationLease, renewBannerPromptGenerationLease, resetRecoveredBannerImageForManualRetry, reviseBannerCreative, spreadBannerIdeas, startBannerImageGeneration, updateBannerCreative } from "./core/banner-store.js";
+import { scheduleRecoveredImageJob } from "./core/banner-job-recovery.js";
 import { buildCompositeEditInstruction, normalizeEditRegionsFromBody, validateEditRegions } from "./core/banner-range-edit.js";
 import {
   getAnthropicSettingsStatus,
@@ -42,7 +43,10 @@ const templateAnalysisConcurrency = normalizeTemplateAnalysisConcurrency(process
 const templateAnalysisWorkerPool = createTemplateAnalysisWorkerPool(templateAnalysisConcurrency);
 const templateAnalysisWorkerOwnerId = `${process.pid}-template-${crypto.randomUUID()}`;
 const scheduledTemplateAnalysisAttempts = new Set();
+const scheduledBannerRecoveryAttempts = new Set();
 let templateAnalysisRecoveryTimer = null;
+let bannerJobRecoveryTimer = null;
+let bannerJobRecoverySweep = null;
 const TEMPLATE_ANALYSIS_CONTROL_FIELDS = new Set([
   "templateProcessingStatus",
   "templateAnalysisAttemptId",
@@ -101,6 +105,11 @@ async function prepareBannerImageJob(projectRoot, bannerId, taskFactory = null, 
     legacyStaleMs: durationFromEnv("CMOAI_IMAGE_STALE_MS", 15 * 60 * 1000)
   });
   if (!claim.claimed) return { accepted: false, claim };
+  return enqueueClaimedBannerImageJob(projectRoot, bannerId, attemptId, taskFactory, claim);
+}
+
+function enqueueClaimedBannerImageJob(projectRoot, bannerId, attemptId, taskFactory = null, claim = null) {
+  const queueLeaseMs = durationFromEnv("CMOAI_IMAGE_QUEUE_LEASE_MS", 15 * 60 * 1000);
   const heartbeatMs = Math.max(30000, Math.min(60000, Math.floor(queueLeaseMs / 3)));
   const heartbeat = setInterval(() => {
     renewBannerImageGenerationLease(projectRoot, bannerId, attemptId, queueLeaseMs).catch(() => null);
@@ -132,7 +141,31 @@ async function prepareBannerImageJob(projectRoot, bannerId, taskFactory = null, 
       if (releaseSlot) await releaseSlot();
     }
   }).finally(() => clearInterval(heartbeat));
-  return { accepted: true, claim, taskPromise };
+  return { accepted: true, claim, attemptId, taskPromise };
+}
+
+function prepareRecoveredBannerImageJob(projectRoot, recoveryJob) {
+  const recoveryKey = `${projectRoot}:${recoveryJob.bannerId}:${recoveryJob.attemptId}`;
+  if (scheduledBannerRecoveryAttempts.has(recoveryKey)) {
+    return { accepted: false, claim: { claimed: false, reason: "scheduled" } };
+  }
+  scheduledBannerRecoveryAttempts.add(recoveryKey);
+  try {
+    const prepared = enqueueClaimedBannerImageJob(
+      projectRoot,
+      recoveryJob.bannerId,
+      recoveryJob.attemptId,
+      null,
+      { claimed: true, recovered: true }
+    );
+    const taskPromise = prepared.taskPromise.finally(() => {
+      scheduledBannerRecoveryAttempts.delete(recoveryKey);
+    });
+    return { ...prepared, taskPromise };
+  } catch (error) {
+    scheduledBannerRecoveryAttempts.delete(recoveryKey);
+    throw error;
+  }
 }
 
 async function prepareBannerImageEditJob(projectRoot, bannerId, taskFactory, { editMode = "range" } = {}) {
@@ -227,6 +260,61 @@ async function recoverTemplateAnalysisQueue() {
   if (queuedCount) console.log(`[CMOAI] Requeued ${queuedCount} template analysis job(s).`);
 }
 
+async function recoverBannerJobQueues() {
+  if (bannerJobRecoverySweep) return bannerJobRecoverySweep;
+  bannerJobRecoverySweep = (async () => {
+    const projects = (await listProjects()).filter((project) => !project.isTemplate && project.status === "draft");
+    const summary = { requeued: 0, promptReset: 0, editReset: 0, imageReset: 0, completedPreserved: 0 };
+    for (const project of projects) {
+      try {
+        const projectRoot = resolveProjectPath(project.path);
+        const recovery = await recoverAbandonedBannerJobs(projectRoot, {
+          ownerId: imageWorkerOwnerId,
+          leaseMs: durationFromEnv("CMOAI_IMAGE_QUEUE_LEASE_MS", 15 * 60 * 1000)
+        });
+        summary.promptReset += recovery.resetPromptIds.length;
+        summary.editReset += recovery.resetEditIds.length;
+        summary.imageReset += recovery.manualImageIds.length;
+        summary.completedPreserved += recovery.completedImageIds.length;
+
+        for (const recoveryJob of recovery.imageJobs) {
+          const scheduled = await scheduleRecoveredImageJob(recoveryJob, {
+            reconcile: async () => {
+              const workspace = await getBannerGenerationWorkspace(projectRoot);
+              return reconcileBannerPipeline(projectRoot, recoveryJob.bannerId, workspace);
+            },
+            enqueue: async () => prepareRecoveredBannerImageJob(projectRoot, recoveryJob),
+            reset: async (_job, reason) => resetRecoveredBannerImageForManualRetry(
+              projectRoot,
+              recoveryJob.bannerId,
+              recoveryJob.attemptId,
+              reason
+            )
+          });
+          if (scheduled.scheduled) {
+            summary.requeued += 1;
+            scheduled.prepared.taskPromise.catch(() => null);
+          }
+        }
+      } catch (error) {
+        console.error(`[CMOAI] Banner recovery skipped project ${project.id}:`, error);
+      }
+    }
+
+    const total = Object.values(summary).reduce((sum, count) => sum + count, 0);
+    if (total) {
+      console.log(
+        `[CMOAI] Banner recovery: requeued=${summary.requeued}, promptReset=${summary.promptReset}, `
+        + `editReset=${summary.editReset}, imageReset=${summary.imageReset}, completedPreserved=${summary.completedPreserved}`
+      );
+    }
+    return summary;
+  })().finally(() => {
+    bannerJobRecoverySweep = null;
+  });
+  return bannerJobRecoverySweep;
+}
+
 function prepareBannerPromptJob(projectRoot, bannerId, pipeline = {}) {
   const attemptId = crypto.randomUUID();
   const leaseMs = durationFromEnv("CMOAI_PROMPT_LEASE_MS", 5 * 60 * 1000);
@@ -282,10 +370,18 @@ async function executeSinglePromptJob(projectRoot, job) {
 
 async function runFullBannerBatchInBackground(projectRoot, promptJobs) {
   let plannedPromptJobs = promptJobs;
+  const dispatchedIds = new Set();
+  const dispatchReadyItems = async (items) => {
+    const readyIds = new Set((items || []).map((item) => item?.banner?.id).filter(Boolean));
+    const readyJobs = plannedPromptJobs.filter((job) => readyIds.has(job.bannerId) && !dispatchedIds.has(job.bannerId));
+    for (const job of readyJobs) dispatchedIds.add(job.bannerId);
+    if (readyJobs.length) await runPromptJobsAndStartImages(projectRoot, readyJobs);
+  };
   try {
     const workspace = await getBannerGenerationWorkspace(projectRoot);
     const copyPreparation = await ensureBannerCopyBriefsForPromptJobs(projectRoot, plannedPromptJobs, workspace, {
       runCopyGroup: (task) => promptWorkerPool.run(() => withGlobalTextSlot(task)),
+      onItemsReady: dispatchReadyItems,
       forceCopyBrief: (item) => ["copyplan"].includes(
         plannedPromptJobs.find((job) => job.bannerId === item.banner.id)?.startNode
       )
@@ -303,8 +399,13 @@ async function runFullBannerBatchInBackground(projectRoot, promptJobs) {
     promptJobs.forEach((job) => clearInterval(job.heartbeat));
     throw error;
   }
-  if (!plannedPromptJobs.length) return;
-  const settled = await runPromptJobsInPool(promptWorkerPool, plannedPromptJobs, async (job) => {
+  const remainingJobs = plannedPromptJobs.filter((job) => !dispatchedIds.has(job.bannerId));
+  if (remainingJobs.length) await runPromptJobsAndStartImages(projectRoot, remainingJobs);
+}
+
+async function runPromptJobsAndStartImages(projectRoot, promptJobs) {
+  if (!promptJobs.length) return;
+  const settled = await runPromptJobsInPool(promptWorkerPool, promptJobs, async (job) => {
     const result = await executeSinglePromptJob(projectRoot, job);
     if (!result.banner) return result;
     try {
@@ -334,7 +435,7 @@ async function runFullBannerBatchInBackground(projectRoot, promptJobs) {
   for (let index = 0; index < settled.length; index += 1) {
     const result = settled[index];
     if (result.status === "rejected") {
-      const job = plannedPromptJobs[index];
+      const job = promptJobs[index];
       await failBannerPromptGeneration(projectRoot, job.bannerId, job.attemptId, result.reason?.message || String(result.reason || ""));
     }
   }
@@ -1060,6 +1161,17 @@ function startListening() {
         });
       }, 60_000);
       templateAnalysisRecoveryTimer.unref();
+    }
+    recoverBannerJobQueues().catch((error) => {
+      console.error("[CMOAI] Banner job recovery failed:", error);
+    });
+    if (!bannerJobRecoveryTimer) {
+      bannerJobRecoveryTimer = setInterval(() => {
+        recoverBannerJobQueues().catch((error) => {
+          console.error("[CMOAI] Banner job recovery sweep failed:", error);
+        });
+      }, 60_000);
+      bannerJobRecoveryTimer.unref();
     }
   });
 }

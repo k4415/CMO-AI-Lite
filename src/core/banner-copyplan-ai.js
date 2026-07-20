@@ -3,7 +3,7 @@ import { anthropicJson } from "./anthropic-text.js";
 import { loadPrompt } from "./prompt-files.js";
 import { classifyExpressionRules, prepareBannerGenerationContext } from "./banner-ai.js";
 import { buildInstructionPolicy } from "./banner-instruction-policy.js";
-import { normalizeApprovedClaimSnapshot } from "./banner-approved-claims.js";
+import { extractObjectiveTokens, normalizeApprovedClaimSnapshot } from "./banner-approved-claims.js";
 import {
   buildCopySlotPlan,
   charBudgetBounds,
@@ -17,7 +17,7 @@ import { checkCopyGate } from "./banner-copy-gate.js";
 
 const DEFAULT_TEXT_MODEL = process.env.CMOAI_BANNER_COPY_MODEL || process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 const BANNER_COPYPLAN_SYSTEM = loadPrompt("banner-copy");
-const REASONING_EFFORT = process.env.CMOAI_BANNER_COPY_EFFORT || process.env.ANTHROPIC_EFFORT || "high";
+const REASONING_EFFORT = process.env.CMOAI_BANNER_COPY_EFFORT || process.env.ANTHROPIC_EFFORT || "low";
 const COPYPLAN_TIMEOUT_MS = Number(process.env.CMOAI_BANNER_COPY_TIMEOUT_MS || process.env.ANTHROPIC_TIMEOUT_MS) || 120000;
 
 export async function generateBannerCopyPlan({
@@ -50,7 +50,9 @@ export async function generateBannerCopyPlan({
   const rules = classifyExpressionRules(expressionRules, generationContext.product, instructionPolicy);
   const copySlotPlan = buildCopySlotPlan(template);
   const snapshot = approvedClaimSnapshot ? normalizeApprovedClaimSnapshot(approvedClaimSnapshot) : null;
+  const enforceObjectiveAuthorization = Array.isArray(approvedClaimSnapshot?.claims);
   const categoryRelation = normalizeCategoryRelation(null, template, strategy);
+  const maxTokens = resolveBannerCopyMaxTokens({ count: targets.length, slotCount: copySlotPlan.slots?.length || 0 });
 
   const userPrompt = buildCopyplanUserPrompt({
     product: generationContext.product,
@@ -75,7 +77,8 @@ export async function generateBannerCopyPlan({
         user: userPrompt,
         model: DEFAULT_TEXT_MODEL,
         reasoningEffort: REASONING_EFFORT,
-        timeoutMs: COPYPLAN_TIMEOUT_MS
+        timeoutMs: COPYPLAN_TIMEOUT_MS,
+        maxTokens
       });
       validateBatchResponse(response, {
         expectedCount: targets.length,
@@ -110,10 +113,11 @@ export async function generateBannerCopyPlan({
     const candidateIndex = stableCandidateIndexes[index];
     let candidate = candidateMap.get(candidateIndex) || parsed.candidates[index];
     const warnings = [];
-    let gateResult = checkCopyGate({
-      copyBrief: { slotTexts: candidate?.slotTexts || [] },
+    let gateResult = checkCandidateGate(candidate, {
       copySlotPlan,
-      expressionRules: rules.ngRules
+      expressionRules: rules.ngRules,
+      approvedClaimSnapshot: snapshot,
+      enforceObjectiveAuthorization
     });
 
     if (!gateResult.ok) {
@@ -125,14 +129,16 @@ export async function generateBannerCopyPlan({
           user: retryPrompt,
           model: DEFAULT_TEXT_MODEL,
           reasoningEffort: REASONING_EFFORT,
-          timeoutMs: COPYPLAN_TIMEOUT_MS
+          timeoutMs: COPYPLAN_TIMEOUT_MS,
+          maxTokens
         });
         const retryCandidate = Array.isArray(retryParsed?.candidates) ? retryParsed.candidates[0] : retryParsed;
         if (retryCandidate?.slotTexts) candidate = retryCandidate;
-        gateResult = checkCopyGate({
-          copyBrief: { slotTexts: candidate?.slotTexts || [] },
+        gateResult = checkCandidateGate(candidate, {
           copySlotPlan,
-          expressionRules: rules.ngRules
+          expressionRules: rules.ngRules,
+          approvedClaimSnapshot: snapshot,
+          enforceObjectiveAuthorization
         });
       } catch {
         // 単案リトライ失敗時は警告付きで続行
@@ -273,7 +279,11 @@ function buildCopyBriefFromCandidate(candidate, {
   candidateIndex
 }) {
   const source = candidate && typeof candidate === "object" ? candidate : {};
-  const slotTexts = normalizeSlotTexts(source.slotTexts || [], copySlotPlan);
+  const slotTexts = sanitizeGeneratedSlotTexts(
+    normalizeSlotTexts(source.slotTexts || [], copySlotPlan),
+    copySlotPlan,
+    approvedClaimSnapshot
+  );
   const canonical = syncCanonicalFieldsFromSlots(slotTexts);
   const variationRole = normalizeVariationRole(source.variationRole, candidateIndex);
   const brief = {
@@ -309,6 +319,85 @@ function buildCopyBriefFromCandidate(candidate, {
   };
   brief.copyBriefHash = hashCopyBrief(brief);
   return brief;
+}
+
+function checkCandidateGate(candidate, {
+  copySlotPlan,
+  expressionRules,
+  approvedClaimSnapshot,
+  enforceObjectiveAuthorization
+}) {
+  const base = checkCopyGate({
+    copyBrief: { slotTexts: candidate?.slotTexts || [] },
+    copySlotPlan,
+    expressionRules
+  });
+  if (!enforceObjectiveAuthorization) return base;
+  const allowedTokens = new Set((approvedClaimSnapshot?.claims || []).flatMap((claim) => claim.objectiveTokens || []));
+  const unauthorized = (candidate?.slotTexts || []).flatMap((slot) => (
+    extractObjectiveTokens(slot?.text).filter((token) => !allowedTokens.has(token)).map((token) => ({
+      type: "unauthorized_objective_claim",
+      slotId: clean(slot?.slotId),
+      message: `${clean(slot?.slotId) || "copy slot"} の数値・保証表現「${token}」は選択WHO-WHATまたは追加指示に根拠がありません。根拠内の表現へ修正してください。`
+    }))
+  ));
+  return {
+    ok: base.ok && unauthorized.length === 0,
+    violations: [...(base.violations || []), ...unauthorized]
+  };
+}
+
+export function resolveBannerCopyMaxTokens({ count = 1, slotCount = 1 } = {}, configuredValue = process.env.CMOAI_BANNER_COPY_MAX_TOKENS) {
+  const configured = Number(configuredValue);
+  if (Number.isFinite(configured) && configured > 0) return Math.max(1000, Math.round(configured));
+  const candidateCount = Math.max(1, Number(count) || 1);
+  const slotsPerCandidate = Math.max(1, Number(slotCount) || 1);
+  return Math.min(12000, 4000 + candidateCount * slotsPerCandidate * 100);
+}
+
+function sanitizeGeneratedSlotTexts(slotTexts, copySlotPlan, approvedClaimSnapshot) {
+  const planSlots = Array.isArray(copySlotPlan?.slots) ? copySlotPlan.slots : [];
+  const planById = new Map(planSlots.map((slot) => [clean(slot.slotId), slot]));
+  const requiredTexts = new Set(slotTexts
+    .filter((slot) => planById.get(clean(slot.slotId))?.required !== false)
+    .map((slot) => comparableCopy(slot.text))
+    .filter(Boolean));
+  const authorizedClaimTexts = Array.isArray(approvedClaimSnapshot?.claims)
+    ? approvedClaimSnapshot.claims.map((claim) => clean(claim?.text)).filter(Boolean)
+    : [];
+
+  return slotTexts.map((slot) => {
+    const planSlot = planById.get(clean(slot.slotId));
+    if (!planSlot || planSlot.required !== false || !clean(slot.text)) return slot;
+    const duplicateOfRequired = requiredTexts.has(comparableCopy(slot.text));
+    const hasOfferOrInstructionSource = (approvedClaimSnapshot?.claims || []).some((claim) => (
+      claim?.claimKind === "offer" || claim?.claimKind === "instruction_claim"
+    ));
+    const unsupportedOptionalAction = planSlot.sourcePolicy === "instruction_or_strategy"
+      && /disclaimer|cta|注釈|免責|行動/i.test(`${planSlot.messageRole || ""} ${planSlot.canonicalField || ""} ${planSlot.role || ""}`)
+      && !hasOfferOrInstructionSource;
+    const unsupportedScarcity = planSlot.sourcePolicy === "instruction_or_strategy"
+      && hasUnsupportedScarcityClaim(slot.text, authorizedClaimTexts);
+    if (!duplicateOfRequired && !unsupportedOptionalAction && !unsupportedScarcity) return slot;
+    return { ...slot, text: "", charCount: 0 };
+  });
+}
+
+function hasUnsupportedScarcityClaim(value, authorizedClaimTexts) {
+  const text = clean(value);
+  const claims = Array.isArray(authorizedClaimTexts) ? authorizedClaimTexts : [];
+  const signals = [
+    { output: /先着/, source: /先着/ },
+    { output: /(?:公開)?枠/, source: /枠/ },
+    { output: /限定|限りあり|今だけ/, source: /限定|限りあり|今だけ/ },
+    { output: /予告なく終了|終了間近/, source: /予告なく終了|終了間近/ },
+    { output: /残り(?:わずか|[0-9０-９])/, source: /残り(?:わずか|[0-9０-９])/ }
+  ];
+  return signals.some(({ output, source }) => output.test(text) && !claims.some((claim) => source.test(claim)));
+}
+
+function comparableCopy(value) {
+  return clean(value).normalize("NFKC").toLowerCase().replace(/[\s。、，,.!！?？・「」『』（）()【】\[\]]/g, "");
 }
 
 function validateBatchResponse(parsed, {

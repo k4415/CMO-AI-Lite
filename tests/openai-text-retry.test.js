@@ -34,6 +34,33 @@ test("text API retries at most twice and returns the successful response", async
   assert.equal(statuses.length, 0);
 });
 
+test("text API records every HTTP attempt with retry reason and request id", async () => {
+  const events = [];
+  const statuses = [429, 200];
+  const response = await fetchOpenAiTextWithRetry("https://example.test", {}, {
+    fetchImpl: async () => new Response("{}", {
+      status: statuses.shift(),
+      headers: { "x-request-id": events.length ? "req-success" : "req-retry" }
+    }),
+    sleep: async () => {},
+    random: () => 0,
+    onAttempt: (event) => events.push(event)
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(events.map((event) => ({
+    httpAttempt: event.httpAttempt,
+    status: event.status,
+    requestId: event.requestId,
+    outcome: event.outcome,
+    retryReason: event.retryReason
+  })), [
+    { httpAttempt: 1, status: 429, requestId: "req-retry", outcome: "http_retry", retryReason: "http_429" },
+    { httpAttempt: 2, status: 200, requestId: "req-success", outcome: "response_received", retryReason: "" }
+  ]);
+  assert.equal(events.every((event) => Number.isFinite(event.durationMs)), true);
+});
+
 test("openAiJson passes reasoning_effort and per-call timeout when provided", async () => {
   let captured = null;
   const fetchImpl = async (url, options) => {
@@ -55,4 +82,21 @@ test("openAiJson omits reasoning_effort by default", async () => {
   };
   await openAiJson({ system: "s", user: "u", fetchImpl });
   assert.equal("reasoning_effort" in captured, false);
+});
+
+test("openAiJson reports a parse failure without changing the thrown error", async () => {
+  const results = [];
+  await assert.rejects(() => openAiJson({
+    system: "s",
+    user: "u",
+    fetchImpl: async () => new Response(JSON.stringify({
+      choices: [{ message: { content: "not-json" } }]
+    }), { status: 200, headers: { "x-request-id": "req-parse" } }),
+    onResult: (event) => results.push(event)
+  }), /JSON/);
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].outcome, "parse_failed");
+  assert.equal(results[0].requestId, "req-parse");
+  assert.equal(results[0].outputChars, 8);
 });

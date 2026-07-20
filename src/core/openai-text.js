@@ -13,7 +13,9 @@ export async function openAiJson({
   model = DEFAULT_TEXT_MODEL,
   reasoningEffort = "",
   timeoutMs = 0,
-  fetchImpl = fetch
+  fetchImpl = fetch,
+  onAttempt = null,
+  onResult = null
 }) {
   const { key } = await getOpenAiKey();
   if (!key) throw new Error("OpenAI API\u30ad\u30fc\u304c\u672a\u8a2d\u5b9a\u3067\u3059\u3002\u8a2d\u5b9a\u753b\u9762\u3067\u4fdd\u5b58\u3059\u308b\u304b\u3001OPENAI_API_KEY\u3092\u8a2d\u5b9a\u3057\u3066\u304f\u3060\u3055\u3044\u3002");
@@ -30,11 +32,43 @@ export async function openAiJson({
     body: JSON.stringify(body)
   }, {
     fetchImpl,
-    timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined
+    timeoutMs: Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined,
+    onAttempt
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error?.message || "OpenAI JSON\u751f\u6210\u306b\u5931\u6557\u3057\u307e\u3057\u305f: " + res.status);
-  return parseJson(data.choices?.[0]?.message?.content || "");
+  const requestId = String(res.headers?.get?.("x-request-id") || res.headers?.get?.("request-id") || "").trim();
+  if (!res.ok) {
+    emitAudit(onResult, {
+      outcome: "http_failed",
+      status: res.status,
+      requestId,
+      outputChars: 0,
+      model
+    });
+    throw new Error(data.error?.message || "OpenAI JSON\u751f\u6210\u306b\u5931\u6557\u3057\u307e\u3057\u305f: " + res.status);
+  }
+  const content = String(data.choices?.[0]?.message?.content || "");
+  try {
+    const parsed = parseJson(content);
+    emitAudit(onResult, {
+      outcome: "completed",
+      status: res.status,
+      requestId,
+      outputChars: content.length,
+      model
+    });
+    return parsed;
+  } catch (error) {
+    emitAudit(onResult, {
+      outcome: "parse_failed",
+      status: res.status,
+      requestId,
+      outputChars: content.length,
+      model,
+      errorMessage: String(error?.message || error)
+    });
+    throw error;
+  }
 }
 
 // Web検索(ブラウジング)付きのJSON生成。Responses APIの web_search ツールでモデル自身に検索させ、
@@ -93,16 +127,56 @@ export async function fetchOpenAiTextWithRetry(url, options, {
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   random = Math.random,
   maxRetries = 2,
-  timeoutMs
+  timeoutMs,
+  onAttempt = null
 } = {}) {
   let retryCount = 0;
   while (true) {
-    const response = await fetchOpenAiTextOnce(url, options, fetchImpl, timeoutMs);
-    if (!shouldRetryOpenAiStatus(response.status) || retryCount >= maxRetries) return response;
+    const httpAttempt = retryCount + 1;
+    const startedAt = new Date().toISOString();
+    const startMs = Date.now();
+    let response;
+    try {
+      response = await fetchOpenAiTextOnce(url, options, fetchImpl, timeoutMs);
+    } catch (error) {
+      emitAudit(onAttempt, {
+        httpAttempt,
+        startedAt,
+        completedAt: new Date().toISOString(),
+        durationMs: Date.now() - startMs,
+        status: 0,
+        requestId: "",
+        outcome: "request_failed",
+        retryReason: "",
+        errorMessage: String(error?.message || error)
+      });
+      throw error;
+    }
+    const shouldRetry = shouldRetryOpenAiStatus(response.status) && retryCount < maxRetries;
+    emitAudit(onAttempt, {
+      httpAttempt,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - startMs,
+      status: response.status,
+      requestId: String(response.headers?.get?.("x-request-id") || response.headers?.get?.("request-id") || "").trim(),
+      outcome: shouldRetry ? "http_retry" : (response.ok ? "response_received" : "http_failed"),
+      retryReason: shouldRetry ? `http_${response.status}` : ""
+    });
+    if (!shouldRetry) return response;
     const delayMs = retryDelayMsForResponse(response, retryCount, random);
     await response.body?.cancel?.().catch(() => null);
     retryCount += 1;
     await sleep(delayMs);
+  }
+}
+
+function emitAudit(callback, event) {
+  if (typeof callback !== "function") return;
+  try {
+    callback(event);
+  } catch {
+    // 監査フックの失敗で本来の生成処理を止めない。
   }
 }
 
