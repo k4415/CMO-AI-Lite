@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 
 import { buildBannerDesignPrompt, normalizeBannerProposal } from "../src/core/banner-ai.js";
 import { hashCopyBrief } from "../src/core/banner-copy-ai.js";
@@ -49,10 +50,10 @@ function validStage2Context() {
   };
 }
 
-test("template HEX is never a color fallback or Stage 2 input", () => {
+test("上位の色指定がない場合はtemplateColorSchemeを最終フォールバックにする", () => {
   const template = {
     id: "tpl_color",
-    templateColorScheme: { main: "#ff0000", accent: "#00ff00" },
+    templateColorScheme: { main: "#ff0000", sub: "#ffffff", accent: "#00ff00", background: "#f8fafc" },
     templateZones: [{ name: "Hero", background: "#ff0000", elements: [{ type: "text", role: "headline", color: "#00ff00", content: "{悩み}" }] }]
   };
   const copyBrief = { appealAxis: "課題", mainHook: "判断を迷わない", whyItStops: "具体的" };
@@ -62,10 +63,18 @@ test("template HEX is never a color fallback or Stage 2 input", () => {
   );
   const prompt = buildBannerDesignPrompt({ banner: {}, product: {}, strategy: {}, template, copyBrief });
 
-  assert.notEqual(proposal.promptJson.colorScheme.main.toLowerCase(), "#ff0000");
-  assert.notEqual(proposal.promptJson.colorScheme.accent.toLowerCase(), "#00ff00");
-  assert.doesNotMatch(prompt.toLowerCase(), /#ff0000|#00ff00/);
-  assert.equal(proposal.colorDecision.ignoredTemplatePalette, true);
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), {
+    main: "#FF0000",
+    sub: "#FFFFFF",
+    accent: "#00FF00",
+    background: "#F8FAFC"
+  });
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
+  assert.deepEqual(proposal.colorDecision.templateFallbackFields, ["main", "sub", "accent", "background"]);
+  assert.match(prompt, /"colorDecision"/);
+  assert.match(prompt, /#FF0000|#00FF00/);
+  assert.doesNotMatch(prompt, /旧コピー|\{悩み\}/);
+  assert.equal(proposal.colorDecision.contractReview.status, "passed");
 });
 
 test("explicit color instruction overrides model and regulation palettes", () => {
@@ -83,8 +92,131 @@ test("explicit color instruction overrides model and regulation palettes", () =>
   );
 
   assert.equal(proposal.promptJson.colorScheme.accent, "#FF0000");
-  assert.equal(proposal.colorDecision.source, "user_instruction");
+  assert.equal(proposal.colorDecision.sourceByField.accent, "user_instruction");
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
 });
+
+test("tpl_default_026の元ゴールドを除去し、追加指示の青アクセントへ再バインドする", async () => {
+  const template = await loadTemplate("tpl_default_026");
+  const proposal = normalizeBannerProposal(
+    { promptJson: { zones: [] } },
+    {
+      banner: { additionalInstruction: "アクセントカラーは青にしてください" },
+      product: {},
+      strategy: { colorInference: { status: "insufficient", palette: {}, reason: "根拠不足", evidence: [] } },
+      template,
+      copyBrief: { appealAxis: "募集", mainHook: "募集しています", whyItStops: "直接的" },
+      instructionPolicy: buildInstructionPolicy("アクセントカラーは青にしてください")
+    }
+  );
+
+  assert.equal(proposal.promptJson.colorScheme.accent, "#2563EB");
+  assert.equal(proposal.colorDecision.sourceByField.accent, "user_instruction");
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
+  assert.doesNotMatch(JSON.stringify(proposal.promptJson), /#D8A514|ゴールド/);
+  assert.equal(proposal.colorDecision.contractReview.status, "passed");
+});
+
+test("tpl_default_032ではregulation指定外の色をWHO-WHAT推論、次にtemplateから補う", async () => {
+  const template = await loadTemplate("tpl_default_032");
+  const strategy = inferredStrategy({
+    main: "#16324F",
+    sub: "#E2E8F0",
+    accent: "#F28C28",
+    background: "#F7FAFC"
+  });
+  const proposal = normalizeBannerProposal(
+    { promptJson: { zones: [] } },
+    {
+      banner: {},
+      product: {},
+      strategy,
+      template,
+      specifiedRules: [{ ruleType: "color", description: "メインカラーは#003366、背景色は#FFFFFF" }],
+      copyBrief: { appealAxis: "得感", mainHook: "今なら始めやすい", whyItStops: "具体的" }
+    }
+  );
+
+  assert.deepEqual(proposal.colorDecision.sourceByField, {
+    main: "regulation",
+    sub: "who_what_inference",
+    accent: "who_what_inference",
+    background: "regulation"
+  });
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
+  assert.equal(proposal.colorDecision.contractReview.status, "passed");
+});
+
+test("有効なWHO-WHAT colorInferenceだけで4色を決定する", () => {
+  const strategy = inferredStrategy({
+    main: "#16324F",
+    sub: "#FFFFFF",
+    accent: "#F28C28",
+    background: "#F7FAFC"
+  });
+  const proposal = normalizeBannerProposal(
+    { promptJson: { colorScheme: { main: "#DEADBE", accent: "#BADBAD" }, zones: [] } },
+    {
+      banner: {}, product: {}, strategy, template: null,
+      copyBrief: { appealAxis: "信頼", mainHook: "安心して始める", whyItStops: "具体的" }
+    }
+  );
+
+  assert.equal(proposal.colorDecision.source, "who_what_inference");
+  assert.deepEqual(proposal.colorDecision.sourcesUsed, ["who_what_inference"]);
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
+  assert.doesNotMatch(JSON.stringify(proposal.promptJson.colorScheme), /DEADBE|BADBAD/);
+});
+
+test("WHO-WHAT推論がinsufficientなら4色すべてtemplate由来にする", async () => {
+  const template = await loadTemplate("tpl_default_026");
+  const proposal = normalizeBannerProposal(
+    { promptJson: { zones: [] } },
+    {
+      banner: {}, product: {},
+      strategy: { colorInference: { status: "insufficient", palette: {}, reason: "根拠不足", evidence: [] } },
+      template,
+      copyBrief: { appealAxis: "募集", mainHook: "募集しています", whyItStops: "直接的" }
+    }
+  );
+
+  assert.equal(proposal.colorDecision.source, "template");
+  assert.deepEqual(proposal.colorDecision.templateFallbackFields, ["main", "sub", "accent", "background"]);
+  assert.deepEqual(paletteOnly(proposal.promptJson.colorScheme), proposal.colorDecision.palette);
+  assert.deepEqual(proposal.colorDecision.palette, {
+    main: "#000000",
+    sub: "#BDBDBD",
+    accent: "#D8A514",
+    background: "#FFFFFF"
+  });
+});
+
+function paletteOnly(value = {}) {
+  return {
+    main: value.main,
+    sub: value.sub,
+    accent: value.accent,
+    background: value.background
+  };
+}
+
+function inferredStrategy(palette) {
+  return {
+    targetAttributes: "広告運用担当者",
+    decisionCriteria: "信頼できること",
+    colorInference: {
+      status: "inferred",
+      palette,
+      reason: "信頼できる判断を支える配色",
+      evidence: ["判断基準: 信頼できること"]
+    }
+  };
+}
+
+async function loadTemplate(id) {
+  const templates = JSON.parse(await fs.readFile(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
+  return templates.find((item) => item.id === id);
+}
 
 test("新規promptJsonにはテンプレ全文を複製保存しない", () => {
   const proposal = normalizeBannerProposal(

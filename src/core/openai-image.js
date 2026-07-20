@@ -10,6 +10,7 @@ import {
   buildSelectedAssetOverridePolicyFromInputImages
 } from "./banner-template-structure.js";
 import { buildLogoVerificationPlan, resolveLogoIdentity, selectedLogoFallbackElements, verifyLogoIdentity } from "./logo-identity.js";
+import { COLOR_FIELDS, normalizePalette } from "./banner-color-decision.js";
 
 // The current guide documents multiple inputs but no numeric maximum. Keep a
 // conservative application cap so recovery never creates an unbounded edit request.
@@ -18,6 +19,7 @@ const GPT_IMAGE_EDIT_MAX_BYTES_PER_IMAGE = 50 * 1024 * 1024;
 const GPT_IMAGE_EDIT_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 export async function generateBannerImageWithGptImage2(projectRoot, banner, context = {}) {
+  assertBannerImageColorContract(banner);
   const { key } = await getOpenAiKey();
   if (!key) throw new Error("OpenAI APIキーが未設定です。設定画面で保存するか、OPENAI_API_KEYを設定してください。");
   const size = normalizeImageSize(banner.promptJson?.basic?.size || banner.promptJson?.basic?.aspectRatio || "1024x1024");
@@ -733,6 +735,7 @@ function mimeFor(filePath) {
 }
 
 export function buildBannerImagePrompt(banner, inputImages = buildBannerInputImageManifest(banner)) {
+  assertBannerImageColorContract(banner);
   const json = banner.promptJson || {};
   const basic = json.basic || {};
   const zones = Array.isArray(json.zones) ? json.zones : [];
@@ -815,6 +818,28 @@ export function buildBannerImagePrompt(banner, inputImages = buildBannerInputIma
     json.templateStructureContract?.closed ? "【最終優先・構造再確認】追加指示は既存elementの色・書体・余白・内容表現の範囲で反映し、契約にない線・下線・カード・バッジ・画像・装飾を増やさない。" : "",
     buildFinalSelectedAssetInstruction(inputImages, selectedAssetPlacements)
   ].filter(Boolean).join("\n");
+}
+
+export function assertBannerImageColorContract(banner = {}) {
+  const decision = banner?.colorDecision;
+  if (!decision || Number(decision.version) !== 2) return true;
+  const promptPalette = normalizePalette(banner?.promptJson?.colorScheme);
+  const decisionPalette = normalizePalette(decision.palette);
+  if (COLOR_FIELDS.some((field) => promptPalette[field] !== decisionPalette[field])) {
+    const error = new Error("画像生成promptのcolorSchemeとcolorDecision.paletteが一致しません。");
+    error.code = "PROMPT_COLOR_DECISION_MISMATCH";
+    error.restartNode = "prompt";
+    error.productionStatus = "failed";
+    throw error;
+  }
+  if (decision.contractReview?.status !== "passed") {
+    const error = new Error("画像生成promptのカラー契約が未検証または不合格です。");
+    error.code = "PROMPT_COLOR_CONTRACT_VIOLATION";
+    error.restartNode = "prompt";
+    error.productionStatus = "failed";
+    throw error;
+  }
+  return true;
 }
 
 export function buildBannerImageRecoveryPrompt(banner, inputImages = buildBannerInputImageManifest(banner)) {

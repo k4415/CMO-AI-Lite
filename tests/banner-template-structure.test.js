@@ -9,6 +9,7 @@ import {
   buildSelectedAssetOverridePolicy,
   buildTemplateStructureContract
 } from "../src/core/banner-template-structure.js";
+import { buildColorNeutralTemplateZones } from "../src/core/banner-template-color.js";
 
 const templates = JSON.parse(fs.readFileSync(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
 const TEMPLATE_IDS = ["tpl_default_026", "tpl_default_042", "tpl_default_009"];
@@ -72,7 +73,8 @@ function deterministicSlotId(element, zoneIndex, elementIndex) {
 }
 
 function expectedTopology(template) {
-  return template.templateZones.map((zone, zoneIndex) => ({
+  const neutralZones = buildColorNeutralTemplateZones(template.templateZones, template.templateColorScheme);
+  return neutralZones.map((zone, zoneIndex) => ({
     position: String(zone.position || ""),
     elements: zone.elements.map((element, elementIndex) => ({
       slotId: deterministicSlotId(element, zoneIndex, elementIndex),
@@ -194,7 +196,8 @@ for (const templateId of TEMPLATE_IDS) {
 test("メモ帳風テンプレは元のshape種別を維持し、画像向けvisualStyleを残さない", () => {
   const template = templateById("tpl_default_026");
   const proposal = proposalFor(template);
-  const sourceShapeDescriptions = template.templateZones.flatMap((zone) => zone.elements)
+  const sourceShapeDescriptions = buildColorNeutralTemplateZones(template.templateZones, template.templateColorScheme)
+    .flatMap((zone) => zone.elements)
     .filter((element) => element.type === "shape")
     .map((element) => element.description || element.content || "");
   const normalizedShapeDescriptions = proposal.promptJson.zones.flatMap((zone) => zone.elements)

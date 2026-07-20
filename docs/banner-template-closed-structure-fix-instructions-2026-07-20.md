@@ -4,6 +4,8 @@
 
 > 2026-07-20追加更新: `docs/banner-generation-latency-retry-fix-instructions-2026-07-20.md` を優先する。選択素材以外のzone / text / image / shapeは増やさない一方、画像slotがないことを理由に選択素材を停止する旧受入基準は廃止済みである。
 
+> 2026-07-20カラー契約更新: `docs/banner-color-priority-template-fallback-fix-instructions-2026-07-20.md` をカラー決定に限って優先する。effectの種類と図形構造は固定するが、effect・shape説明内の具体色は固定せず、色中立化後に`colorDecision.palette`へ再バインドする。
+
 作成日: 2026-07-20
 対象: CMO AI Lite / STEP3 バナー制作
 対象リポジトリ: `/Users/koukamiyoshihiko/CMO-AI-Lite-main`
@@ -41,14 +43,14 @@
 - `type` (`text` / `image` / `shape`)
 - `role` と `messageRole`
 - `position` と `size`
-- `effect`（下線、囲み、影などの装飾を含む）
+- `effect`の種類（下線、囲み、影など。具体色の表層は固定対象外）
 - shapeの `description` / `content`（戻る、共有、枠、帯など図形の構造的な種類）
 
 Stage 2モデルが変更できるのは、既存elementの枠内で商品・WHO-WHATに適合させる次の情報に限定する。
 
 - text: `content` は `copyBrief.slotTexts` の確定文言のみ、`font`、`color`、`sourceReason`
 - image: 既存画像枠のroleを変えない範囲での `content` / `sourceReason`（被写体や素材の具体化）
-- shape: `sourceReason` のみ。元テンプレの図形種別、位置、サイズ、effectは変更しない
+- shape: `sourceReason` のみ。元テンプレの図形種別、位置、サイズ、effectの種類は変更しない。具体色は`colorRole`へ置き換えて確定paletteを使う
 - zone: 元の位置と目的を維持したうえでの背景表現。ただし新しいelementを発生させない
 
 ### 3.2 AI出力を信頼するだけでなくコード側で強制する

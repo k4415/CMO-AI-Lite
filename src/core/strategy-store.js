@@ -1,6 +1,7 @@
 ﻿import crypto from "node:crypto";
 import path from "node:path";
 import { pathExists, readJson, writeJson, withFileLock } from "./project-store.js";
+import { normalizeColorInference } from "./banner-color-decision.js";
 
 const STRATEGIES_PATH = "data/strategies.json";
 
@@ -10,7 +11,7 @@ export async function ensureStrategyData(projectRoot) {
 
 export async function listStrategies(projectRoot) {
   await ensureStrategyData(projectRoot);
-  return readJson(projectRoot, STRATEGIES_PATH);
+  return (await readJson(projectRoot, STRATEGIES_PATH)).map(normalizeStrategy);
 }
 
 export async function addStrategy(projectRoot, input) {
@@ -94,9 +95,21 @@ function normalizeStrategy(input) {
     status: clean(input.status) || "draft",
     sourceRunId: clean(input.sourceRunId),
     markdown: clean(input.markdown),
+    colorInference: normalizeStoredColorInference(input.colorInference, input),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt
   };
+}
+
+function normalizeStoredColorInference(value, strategy) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { status: "insufficient", palette: {}, reason: "legacy_or_manual_strategy", evidence: [] };
+  }
+  const normalized = normalizeColorInference(value, strategy);
+  if (normalized.status === "insufficient" && !String(value.reason || "").trim()) {
+    normalized.reason = "legacy_or_manual_strategy";
+  }
+  return normalized;
 }
 
 function clean(value) {

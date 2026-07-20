@@ -7,6 +7,8 @@
 > **状態:** 実装・実画像検証済み。実装前指示書のセルフレビューは95/100、P0/P1なし。実装結果は「18. 実装・検証結果」に記録する。
 > **実装時必須:** `superpowers:test-driven-development` と `implementation-self-review-loop` を適用し、各PhaseをRED→GREEN→自己レビューの順で進める。
 
+> **2026-07-20カラー契約更新:** `docs/banner-color-priority-template-fallback-fix-instructions-2026-07-20.md`に従い、カラー決定は保存済みWHO-WHAT推論とローカル純粋関数で行う。カラー決定を理由にStage 2モデル呼び出しを復活・追加せず、閉じたテンプレの`modelDesignCalls=0`を維持する。
+
 ## 1. Goal
 
 ユーザーが選択したロゴ・商品画像を必ず画像生成へ渡し、テンプレの閉じた構造とコピー固定を維持したまま、次の不要な待ち時間を削減する。
