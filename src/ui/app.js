@@ -2358,6 +2358,9 @@ function bannerAuditWarningHtml(banner) {
   if (banner?.productionStatus === "needs_copy_visual_review") {
     return '<div class="factCheckWarning">確認が必要</div>';
   }
+  if (Array.isArray(banner?.warnings) && banner.warnings.some((warning) => warning?.type === "logo_mismatch")) {
+    return '<div class="factCheckWarning">ロゴ確認が必要</div>';
+  }
   const needsRegeneration = [
     "failed",
     "hypothesis_contract_failed",
@@ -2383,6 +2386,7 @@ function bannerListProductionStatus(value) {
 function bannerWarningLabel(warning) {
   const labels = {
     ocr_mismatch: "画像内コピー不一致",
+    logo_mismatch: "ロゴ不一致",
     copy_selfcheck_unresolved: "コピー自己チェック未解決",
     copy_gate_length: "文字数超過",
     copy_gate_slot: "スロット欠落",
@@ -4706,6 +4710,11 @@ function handleGlobalUiChange(event) {
   const labelInput = event.target.closest(".productImageLabelInput");
   if (labelInput) {
     updateProductImageField(labelInput.dataset.productId, labelInput.dataset.imageId, { label: labelInput.value.trim() });
+    return;
+  }
+  const wordmarkInput = event.target.closest(".productImageWordmarkInput");
+  if (wordmarkInput) {
+    updateProductImageField(wordmarkInput.dataset.productId, wordmarkInput.dataset.imageId, { officialWordmark: wordmarkInput.value.trim() });
   }
 }
 
@@ -5436,11 +5445,15 @@ function productImageCardHtml(productId, image) {
   const roleOptions = [["product", "商品写真"], ["logo", "ロゴ"], ["other", "その他"]]
     .map(([value, label]) => '<option value="' + value + '" ' + (image.role === value ? "selected" : "") + '>' + escapeHtml(label) + '</option>')
     .join("");
+  const officialWordmarkInput = image.role === "logo"
+    ? '<label class="productImageWordmarkField"><span>正式ロゴ表記</span><input type="text" class="tableInput productImageWordmarkInput" data-product-id="' + escapeAttr(productId) + '" data-image-id="' + escapeAttr(image.id) + '" value="' + escapeAttr(image.officialWordmark || "") + '" placeholder="例: Sample Smile" aria-label="正式ロゴ表記" /></label>'
+    : "";
   return '<div class="productImageCard">'
     + '<button type="button" class="imageCellButton" data-preview-image="' + escapeAttr(src) + '" data-preview-title="' + escapeAttr(image.label || image.path) + '"><img src="' + escapeAttr(src) + '" alt="" /></button>'
     + '<div class="productImageMeta">'
     + '<select class="tableSelect productImageRoleSelect" data-product-id="' + escapeAttr(productId) + '" data-image-id="' + escapeAttr(image.id) + '">' + roleOptions + '</select>'
     + '<input type="text" class="tableInput productImageLabelInput" data-product-id="' + escapeAttr(productId) + '" data-image-id="' + escapeAttr(image.id) + '" value="' + escapeAttr(image.label || "") + '" placeholder="素材名（例：正面）" aria-label="素材名" />'
+    + officialWordmarkInput
     + '<button type="button" class="tableButton iconDelete productImageDeleteButton" title="削除" aria-label="削除" data-product-id="' + escapeAttr(productId) + '" data-image-id="' + escapeAttr(image.id) + '"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg></button>'
     + '</div></div>';
 }

@@ -12,11 +12,17 @@
 - コピー開発は行わない。copyBriefの文言は確定済み素材であり、imageText・zones内テキストではそのまま使う。
 - copyBriefのmainHook、subHook、proof、offerBadge、cta、disclaimerを、語尾調整・要約・言い換えしてはいけない。許可されるのは読みやすい改行位置の調整だけ。
 - copyBrief.slotTexts がある場合、zones内テキストは slotId で対応する slotTexts.text だけを配置する。Stage 2でコピーの取捨選択、詰め替え、短縮、補完をしてはいけない。slotIdのない新しいテキスト枠を増やさない。
+- templateZonesがある場合、そのzone / element一覧は閉じた構造契約である。ユーザー選択素材の例外を除き、zone数、element数、slotId、type、role、messageRole、所属zone、position、size、effectを変更しない。
+- 閉じた構造契約では、textだけでなくimage / shapeも追加・削除・移動・type変更しない。元テンプレにないロゴ、人物、端末、図解、カード、接続線、バッジ、下線、囲み、背景モチーフを追加しない。ただしバナー案でユーザーが明示選択したロゴ・商品画像・その他画像だけは唯一の例外とする。
+- ユーザー選択素材はすべて完成画像へ必ず反映する。対応する既存image枠があれば優先し、対応枠がない、roleが異なる、または枠数が不足する場合も、選択素材に限って基本の視線順と可読性を壊さない最小限の配置追加・置換を許可する。
+- 選択されていないロゴ・商品画像・その他画像は追加・生成しない。選択素材を理由に、別の人物、写真、イラスト、端末、図解、アイコン、カード、バッジ、下線、囲み、背景モチーフを増やさない。
+- 正式ロゴ画像が選択されている場合は、既存のlogo image枠があれば優先して使う。枠がない場合も選択素材の例外として必ず表示する。元テンプレのブランド名、font、color、「白単色」等のeffectはロゴ原本と競合する表層指定なので適用せず、添付ロゴを切り抜き・着色・再描画・短縮しない。
+- creativeHypothesis.visualIntentや追加指示が閉じた構造契約と衝突した場合、ユーザー選択素材だけを例外とし、それ以外はテンプレ構造を優先して既存elementの枠内だけで表現する。
 - Stage 2の責務は、確定コピーをテンプレ構造に載せ、商品/WHO-WHATに合う視覚表現、構図、配色、被写体、余白、視線誘導へ具体化すること。
 - テンプレート3層分離を厳守する。
   - 構造レイヤー: ゾーン構成・要素配置・視線誘導・余白設計は引き継ぐ。
   - デザインレイヤー: 配色の役割・フォント役割・コントラスト方針は参考にする。
-  - コンテンツレイヤー: 画像シーン・具体色・トーンは商品/WHO-WHAT/copyBriefから新規作成する。
+  - コンテンツレイヤー: 画像シーン・具体色・トーンは商品/WHO-WHAT/copyBriefから新規作成する。ただし「新規作成」は原則として既存image / shape枠の内側の内容差し替えを意味する。ユーザー選択素材だけは唯一の例外として最小限配置できるが、それ以外の新しいelementの追加は許可しない。
 - テンプレのコピー、固有商材、被写体、カラーコードをそのまま流用しない。
 - テンプレートのtitle、name、labelは表示用メタデータであり、具体色、トーン、被写体を含む可能性があるため生成入力にも出力にも含めない。テンプレの識別にはtemplateId、デザイン判断には心理メカニズム、semanticGroups、視線順、抽象化済み構造だけを使う。
 - テンプレにcontentArchitectureがある場合、messageFlow・primaryHook・proofStrategy・offerStrategy・visualHierarchyを構造レイヤーとして優先的に引き継ぐ。
@@ -75,7 +81,7 @@
             "effect": "",
             "targetChars": 0,
             "sourceReason": "",
-            "templateReuseLevel": "structure-only"
+            "templateReuseLevel": "closed-structure"
           }
         ]
       }

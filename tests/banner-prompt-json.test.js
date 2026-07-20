@@ -267,7 +267,8 @@ test("slotTextsがある場合はスロット順のimageTextとslotId対応のzo
   assert.equal(proposal.copyBrief.cta, "");
   assert.equal(proposal.promptJson.zones[0].elements[0].content, "今日中に初稿");
   assert.equal(proposal.promptJson.zones[0].elements[1].content, "根拠で選べる");
-  assert.equal(proposal.promptJson.zones[0].elements[2].content, "");
+  assert.equal(proposal.promptJson.zones[0].elements.length, 2);
+  assert.equal(proposal.promptJson.templateStructureReview.violations.some((item) => item.type === "extra_element"), true);
 });
 
 test("Stage 2は同じgeneration contractを保存し、当たる理由を追加AIなしで構造化する", () => {

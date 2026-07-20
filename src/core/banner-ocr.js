@@ -11,6 +11,12 @@ export function recognizeBannerText(imagePath) {
   return task;
 }
 
+export function recognizeBannerEvidence(imagePath, { regions = [] } = {}) {
+  const task = ocrQueue.then(() => runOcrEvidence(imagePath, regions));
+  ocrQueue = task.catch(() => {});
+  return task;
+}
+
 export function verifyCopyIntegrity(expected, actual, { ocrError = "" } = {}) {
   const expectedLines = normalizeExpectedLines(expected);
   const actualText = String(actual || "").trim();
@@ -60,4 +66,72 @@ async function runOcr(imagePath) {
   } finally {
     await worker.terminate();
   }
+}
+
+async function runOcrEvidence(imagePath, regions) {
+  const cachePath = path.join(os.homedir(), ".cache", "cmoai", "tesseract");
+  await fs.mkdir(cachePath, { recursive: true });
+  const worker = await createWorker("jpn+eng", 1, { cachePath });
+  try {
+    const fullResult = await worker.recognize(imagePath, {}, { text: true, blocks: true });
+    const logoRegionTexts = [];
+    for (const region of Array.isArray(regions) ? regions : []) {
+      let text = textFromOcrBlocksInRegion(fullResult.data?.blocks, region.rectangle);
+      if (!text) {
+        const result = await worker.recognize(imagePath, { rectangle: region.rectangle });
+        text = String(result.data?.text || "").trim();
+      }
+      logoRegionTexts.push({
+        slotId: String(region.slotId || ""),
+        rectangle: region.rectangle,
+        text
+      });
+    }
+    return { ocrText: String(fullResult.data?.text || "").trim(), logoRegionTexts };
+  } finally {
+    await worker.terminate();
+  }
+}
+
+export function textFromOcrBlocksInRegion(blocks, rectangle) {
+  if (!rectangle || !Array.isArray(blocks)) return "";
+  const words = [];
+  collectOcrWords(blocks, words, new WeakSet());
+  return words
+    .filter((word) => boxesIntersect(word.bbox, rectangle))
+    .map((word) => String(word.text || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectOcrWords(value, words, seen) {
+  if (!value || typeof value !== "object") return;
+  if (seen.has(value)) return;
+  seen.add(value);
+  if (!Array.isArray(value) && Array.isArray(value.symbols) && value.bbox && value.text !== undefined) {
+    words.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectOcrWords(item, words, seen);
+    return;
+  }
+  for (const child of Object.values(value)) collectOcrWords(child, words, seen);
+}
+
+function boxesIntersect(bbox, rectangle) {
+  if (!bbox) return false;
+  const left = Number(bbox.x0);
+  const top = Number(bbox.y0);
+  const right = Number(bbox.x1);
+  const bottom = Number(bbox.y1);
+  const regionRight = Number(rectangle.left) + Number(rectangle.width);
+  const regionBottom = Number(rectangle.top) + Number(rectangle.height);
+  return [left, top, right, bottom, regionRight, regionBottom].every(Number.isFinite)
+    && right > Number(rectangle.left)
+    && left < regionRight
+    && bottom > Number(rectangle.top)
+    && top < regionBottom;
 }

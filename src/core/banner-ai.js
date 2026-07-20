@@ -4,6 +4,13 @@ import { buildCopySlotPlan, copyBriefMeetsSlotRequirements, isBrandOrLogoText, n
 import { buildInstructionPolicy, ruleIsExplicitlyOverridden } from "./banner-instruction-policy.js";
 import { buildBannerGenerationContract } from "./banner-generation-contract.js";
 import { hashCopyBrief } from "./banner-copy-hash.js";
+import {
+  buildClosedStructureInstruction,
+  buildSelectedAssetOverrideInstruction,
+  buildSelectedAssetOverridePolicy,
+  buildTemplateStructureContract,
+  enforceTemplateStructure
+} from "./banner-template-structure.js";
 
 export async function generateBannerCreativeProposal({
   banner,
@@ -119,6 +126,8 @@ export function prepareBannerGenerationContext(product = {}, strategy = {}) {
 }
 
 export function buildBannerDesignPrompt({ banner, product, strategy, template, specifiedRules, instructionPolicy = null, diversityGuidance, copyBrief, copySlotPlan, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null, retryReason }) {
+  const templateStructureContract = buildTemplateStructureContract(template?.templateZones);
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
   const resolvedContract = stripTemplateDisplayMetadataFromContract(generationContract || buildBannerGenerationContract({
     banner,
     product,
@@ -147,6 +156,11 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
     "zones内のtext要素は、このslotIdに対応するcopyBrief.slotTextsのtextだけを配置する。コピーの取捨選択・詰め替え・言い換えは禁止。",
     JSON.stringify(summarizeCopySlotPlanForPrompt(copySlotPlan || buildCopySlotPlan(template)), null, 2),
     "",
+    templateStructureContract.closed ? "# テンプレ構造契約（最優先・変更禁止）" : "",
+    templateStructureContract.closed ? buildClosedStructureInstruction(templateStructureContract, selectedAssetPolicy) : "",
+    templateStructureContract.closed ? JSON.stringify(templateStructureContract, null, 2) : "",
+    selectedAssetPolicy.enabled ? "# ユーザー選択素材（テンプレ構造に対する唯一の例外）" : "",
+    selectedAssetPolicy.enabled ? buildSelectedAssetOverrideInstruction(selectedAssetPolicy) : "",
     "# CreativeHypothesisContract（コピー開発前に確定済み・変更禁止）",
     JSON.stringify(creativeHypothesis || {}, null, 2),
     "",
@@ -177,7 +191,7 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
     "zones[].elements[] の text 要素は copyBrief.slotTexts の slotId 対応で配置する。slotTextsがない旧データの場合のみ mainHook, subHook, proof, offerBadge, cta, disclaimer の非空値を使う。新しいコピーを書かない。",
     "promptJson.target, desire, benefit, offerは戦略本文から読み取り、画像生成へ渡す完成値を必ず入れる。",
     "商品にbrandToneが設定されている場合はglobalDesign.toneに反映する。ブランドカラーは商品情報から指定せず、テンプレ構造と訴求内容に合う配色を設計する。",
-    "テンプレDBがある場合は、構造レイヤー（ゾーン構成・要素配置・視線誘導・余白設計）を維持し、デザインレイヤーは参考にし、コンテンツレイヤー（画像シーン・具体色・トーン）は商品/WHO-WHAT/copyBriefから新規作成する。",
+    "テンプレDBがある場合は、構造レイヤー（ゾーン構成・要素配置・視線誘導・余白設計）を維持し、デザインレイヤーは参考にする。コンテンツレイヤーの新規作成とは、既存image/shape枠の内側を商品/WHO-WHAT/copyBriefに合わせることを意味する。ユーザー選択素材だけは唯一の例外として、対応枠がない場合も最小限配置できるが、それ以外の新しいelementは追加しない。",
     "テンプレにcontentArchitecture/variableDefinitionsがある場合は、訴求順序と各要素のmessageRole/source/constraintsを維持し、単純な名詞置換ではなく同じ役割を果たす配置と画像へ差し替える。",
     "各zones[].elements[]には type, role, content, position, size, targetChars, sourceReason, templateReuseLevel を入れる。",
     "テンプレ未指定の場合も、DR広告として読める構造を自分で定義する。"
@@ -346,9 +360,13 @@ function contractError(code, restartNode, message) {
 function normalizePromptJson(promptJson, { banner, product, strategy, template, imageText, diversityGuidance, copyBrief, copySlotPlan, specifiedRules, instructionPolicy, contractRefs = null }) {
   const hasModelZones = Array.isArray(promptJson.zones) && promptJson.zones.length;
   const sanitizedTemplateZones = sanitizeTemplateZonesForDesign(template?.templateZones);
-  const sourceZones = hasModelZones
-    ? promptJson.zones
-    : (sanitizedTemplateZones.length ? sanitizedTemplateZones : fallbackZones({ product, strategy, copyBrief }));
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
+  const templateStructure = sanitizedTemplateZones.length
+    ? enforceTemplateStructure({ templateZones: template?.templateZones, generatedZones: promptJson.zones })
+    : null;
+  const sourceZones = templateStructure
+    ? templateStructure.zones
+    : (hasModelZones ? promptJson.zones : fallbackZones({ product, strategy, copyBrief }));
   const basic = promptJson.basic && typeof promptJson.basic === "object" ? promptJson.basic : {};
   const globalDesign = promptJson.globalDesign && typeof promptJson.globalDesign === "object" ? promptJson.globalDesign : {};
   const colorScheme = promptJson.colorScheme && typeof promptJson.colorScheme === "object" ? promptJson.colorScheme : {};
@@ -372,15 +390,30 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
   });
   const zones = normalizeZones(sourceZones, copyBrief, copySlotPlan, product).map((zone) => ({
     ...zone,
-    ...(hasModelZones ? {} : { background: "" }),
+    ...(!hasModelZones && !templateStructure ? { background: "" } : {}),
     elements: (zone.elements || []).map((element) => ({
       ...element,
-      ...(!hasModelZones ? { color: colorForElement(element, resolvedColorScheme) } : {})
+      ...(!element.color ? { color: colorForElement(element, resolvedColorScheme) } : {})
     }))
   }));
-  const structureSheet = promptJson.structureSheet || promptJson.templateStructure || buildStructureSheet(sanitizeTemplateLayout(template?.layoutBlueprint || template?.templatePromptJson?.layoutBlueprint), zones);
+  const structureSheet = templateStructure
+    ? buildStructureSheet(null, zones)
+    : (promptJson.structureSheet || promptJson.templateStructure || buildStructureSheet(null, zones));
   const templateDesign = sanitizeTemplateDesign(template?.templateGlobalDesign) || {};
   const requestedSize = String(banner.imageSize || "").trim();
+  const resolvedVisualStyle = templateStructure?.contract?.typeCounts?.image === 0 && !selectedAssetPolicy.enabled
+    ? {
+        type: "text-and-existing-shapes-only",
+        mood: String(globalDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
+        note: "既存のtext/shape要素だけを使用する。ロゴ、写真、イラスト、人物、端末、図解、追加装飾を描かない。"
+      }
+    : (selectedAssetPolicy.enabled && templateStructure?.contract?.typeCounts?.image === 0
+      ? {
+          type: "selected-assets-with-template-layout",
+          mood: String(globalDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
+          note: "閉じたテンプレの視線順と可読性を維持し、ユーザー選択素材だけを最小限追加する。それ以外の画像・装飾は増やさない。"
+        }
+      : (globalDesign.visualStyle || templateDesign.visualStyle || { type: "product and benefit scene", mood: "credible", note: "avoid copying template subject matter" }));
   return {
     basic: {
       aspectRatio: requestedSize ? deriveAspectRatioLabel(requestedSize) : String(basic.aspectRatio || promptJson.aspectRatio || "1:1"),
@@ -401,14 +434,22 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
       fontPolicy: globalDesign.fontPolicy || { primary: "large readable Japanese headline", secondary: "support copy", note: "small but legible notes" },
       spacingPolicy: globalDesign.spacingPolicy || { overall: "preserve clear margins", margin: "10% or more where possible", elementGap: "avoid crowding text" },
       contrastPolicy: globalDesign.contrastPolicy || { level: "high", note: "CTA and main copy must stand out" },
-      visualStyle: globalDesign.visualStyle || { type: "product and benefit scene", mood: "credible", note: "avoid copying template subject matter" },
+      visualStyle: resolvedVisualStyle,
       gridAlignment: globalDesign.gridAlignment || { horizontal: "structured alignment", vertical: "zone based", note: "maintain template-like hierarchy" },
       designRationale: String(globalDesign.designRationale || promptJson.visualDirection || diversityGuidance?.axisInstruction || "")
     },
     colorScheme: resolvedColorScheme,
     zones,
+    ...(templateStructure ? {
+      templateStructureContract: templateStructure.contract,
+      templateStructureReview: {
+        status: templateStructure.status,
+        violations: templateStructure.violations
+      }
+    } : {}),
+    selectedAssetPolicy,
     referenceImage: {
-      instruction: buildReferenceImageInstruction(banner),
+      instruction: buildReferenceImageInstruction(banner, templateStructure?.contract, selectedAssetPolicy),
       url: ""
     },
     copyBrief: {
@@ -422,7 +463,17 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
       templateFitDecision: copyBrief.templateFitDecision || null,
       slotTexts: Array.isArray(copyBrief.slotTexts) ? copyBrief.slotTexts : []
     },
-    negativeRules: uniqueStrings(normalizeList(promptJson.negativeRules).concat(["効果保証", "過度なBefore/After", "医療的な治療表現"])),
+    negativeRules: uniqueStrings(normalizeList(promptJson.negativeRules).concat([
+      "効果保証",
+      "過度なBefore/After",
+      "医療的な治療表現",
+      ...(templateStructure
+        ? [selectedAssetPolicy.enabled
+          ? "ユーザー選択素材以外のテンプレ構造にないtext/image/shape/装飾を追加しない"
+          : "テンプレ構造にないtext/image/shape/装飾を追加しない"]
+        : []),
+      ...(templateStructure?.contract?.typeCounts?.image === 0 && !selectedAssetPolicy.enabled ? ["ロゴ・写真・イラスト・人物・端末・図解を追加しない"] : [])
+    ])),
     reviewChecklist: normalizeReviewChecklist(promptJson.reviewChecklist),
     imageText,
     ...(contractRefs ? { contractRefs: { ...contractRefs } } : {})
@@ -678,10 +729,12 @@ function colorForElement(element, palette) {
 
 function summarizeTemplateForPrompt(template) {
   if (!template || typeof template !== "object") return null;
+  const layoutBlueprint = sanitizeTemplateLayout(template.layoutBlueprint || template.templatePromptJson?.layoutBlueprint);
+  const hasClosedTemplateZones = Array.isArray(template.templateZones) && template.templateZones.length > 0;
   return {
     id: template.id || "",
     creativeType: template.creativeType || "",
-    layoutBlueprint: sanitizeTemplateLayout(template.layoutBlueprint || template.templatePromptJson?.layoutBlueprint),
+    layoutBlueprint: layoutBlueprint && hasClosedTemplateZones ? { ...layoutBlueprint, zones: [] } : layoutBlueprint,
     templateGlobalDesign: sanitizeTemplateDesign(template.templateGlobalDesign),
     templateZones: sanitizeTemplateZonesForDesign(template.templateZones)
   };
@@ -723,14 +776,17 @@ function sanitizeTemplateDesign(value) {
 }
 
 function sanitizeTemplateZonesForDesign(zones) {
-  return (Array.isArray(zones) ? zones : []).slice(0, 12).map((zone) => ({
+  return (Array.isArray(zones) ? zones : []).map((zone, zoneIndex) => ({
     position: zone?.position || "",
     purpose: zone?.purpose || "",
-    elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element) => ({
+    elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => ({
       type: element?.type || "",
-      slotId: element?.slotId || "",
+      slotId: element?.slotId || `z${zoneIndex + 1}e${elementIndex + 1}`,
       role: element?.role || "",
       messageRole: element?.messageRole || "",
+      ...(String(element?.type || "").toLowerCase() === "shape"
+        ? { structuralContent: element?.description || element?.content || "" }
+        : {}),
       position: element?.position || {},
       size: element?.size || "",
       effect: element?.effect || "",
@@ -791,7 +847,7 @@ function stripTemplateDisplayMetadataFromContract(value) {
   };
 }
 
-function buildReferenceImageInstruction(banner) {
+function buildReferenceImageInstruction(banner, templateStructureContract = null, selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner)) {
   const productImageCount = banner.productImagePaths?.length || (banner.productImagePath ? 1 : 0);
   const logoImageCount = banner.logoImagePaths?.length || (banner.logoImagePath ? 1 : 0);
   const otherImageCount = banner.otherImagePaths?.length || (banner.otherImagePath ? 1 : 0);
@@ -799,14 +855,25 @@ function buildReferenceImageInstruction(banner) {
   const hasLogoImage = logoImageCount > 0;
   const hasOtherImage = otherImageCount > 0;
   if (!hasProductImage && !hasLogoImage && !hasOtherImage) {
+    if (templateStructureContract?.closed && Number(templateStructureContract?.typeCounts?.image || 0) === 0) {
+      return "参照画像なし。閉じたテンプレ構造に画像枠がないため、ロゴ・写真・イラスト・人物・端末・図解を追加しない。";
+    }
+    if (templateStructureContract?.closed) {
+      return "参照画像なし。画像表現はテンプレ構造にある既存image枠の内側だけで作成し、画像枠を追加しない。";
+    }
     return "参照画像が添付されている場合は素材として優先反映し、テンプレの構造だけを活用する。コピーや固有商材は流用しない。";
   }
   const lines = [];
   let index = 0;
   if (hasLogoImage) { lines.push(`先頭から${logoImageCount}枚は必ず表示する正式なブランドロゴ。元画像のピクセル、文字、色、縦横比を改変・再描画せず、他の文字で代替せず、視認性の高い位置に配置する。`); index += logoImageCount; }
   if (hasProductImage) { lines.push(`${index ? "続く" : "先頭から"}${productImageCount}枚は実際の商品写真。パッケージの形状・ラベル・ロゴ表記を忠実に維持して主要被写体として配置する。`); index += productImageCount; }
-  if (hasOtherImage) { lines.push(`${index ? "続く" : "先頭から"}${otherImageCount}枚はその他の参考素材(人物・背景・使用シーン等)。トーンや雰囲気の参考として活用する。`); }
-  return lines.join("\n");
+  if (hasOtherImage) { lines.push(`${index ? "続く" : "先頭から"}${otherImageCount}枚はその他の選択素材(人物・背景・使用シーン等)。完成画像へ必ず反映する。`); }
+  return [
+    ...lines,
+    templateStructureContract?.closed && selectedAssetPolicy.enabled
+      ? "これらのユーザー選択素材だけは閉じたテンプレ構造の唯一の例外。対応画像枠がなくても、基本構造を崩さない最小限の位置へすべて配置する。選択されていない素材は追加しない。"
+      : ""
+  ].filter(Boolean).join("\n");
 }
 
 function buildStructureSheet(layout, zones) {
@@ -848,6 +915,7 @@ function buildPromptText(promptJson) {
     "Zones:",
     ...((promptJson.zones || []).map((zone) => `${zone.name} (${zone.position}): ${zone.purpose}; elements=${JSON.stringify(zone.elements || [])}`)),
     `Reference image instruction: ${promptJson.referenceImage?.instruction || ""}`,
+    promptJson.selectedAssetPolicy?.enabled ? `Selected asset policy: ${JSON.stringify(promptJson.selectedAssetPolicy)}` : "",
     `Negative rules: ${(promptJson.negativeRules || []).join(", ")}`
   ].filter(Boolean).join("\n");
 }

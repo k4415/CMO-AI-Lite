@@ -107,3 +107,173 @@ test("復旧後も無関係なら完了にせず失敗として保存する", as
   assert.equal(stored.imageGenerationAudit.attempts.length, 2);
   assert.equal(stored.imageGenerationAudit.selectedAttempt, null);
 });
+
+test("ロゴ領域で正式表記が欠けた場合は1回だけ再生成し、改善後に完了する", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-logo-retry-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "assets"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "assets", "sample-brand.png"), Buffer.from("source-logo"));
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env["OPENAI_API_KEY"] = "test-key";
+  t.after(() => {
+    if (originalKey === undefined) delete process.env["OPENAI_API_KEY"];
+    else process.env["OPENAI_API_KEY"] = originalKey;
+  });
+
+  const created = await addBannerCreative(projectRoot, { productId: "p1", strategyId: "s1", title: "logo retry", logoImagePaths: ["assets/sample-brand.png"] });
+  const banner = await updateBannerCreative(projectRoot, created.id, {
+    imageText: "毎日をもっと便利に",
+    promptJson: {
+      productName: "Sample Smile",
+      basic: { size: "1024x1024" },
+      templateStructureContract: {
+        closed: true,
+        zoneCount: 1,
+        elementCount: 1,
+        typeCounts: { text: 0, image: 1, shape: 0 },
+        zones: [{ elements: [{ slotId: "z1e1", type: "image", role: "logo", messageRole: "logo", position: { top: "3%", left: "80%" }, size: "17% width x 7% height" }] }]
+      },
+      zones: [{ name: "brand", elements: [{ slotId: "z1e1", type: "image", role: "logo", messageRole: "logo", position: { top: "3%", left: "80%" }, size: "17% width x 7% height" }] }]
+    }
+  });
+  const prompts = [];
+  const fetchImpl = async (_url, options) => {
+    prompts.push(options.body.get("prompt"));
+    return new Response(JSON.stringify({ data: [{ b64_json: PNG_BYTES.toString("base64") }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const ocrReader = async (_root, _path, attempt, options) => ({
+    ocrText: "毎日をもっと便利に Sample Smile",
+    ocrError: "",
+    logoRegionTexts: [{ slotId: options.logoRegions[0].slotId, text: attempt === 1 ? "SMILE" : "Sample Smile" }]
+  });
+  await generateBannerImageWithGptImage2(projectRoot, banner, {
+    fetchImpl,
+    ocrReader,
+    product: { id: "p1", name: "Sample Smile", images: [{ id: "img1", path: "assets/sample-brand.png", role: "logo", officialWordmark: "Sample Smile" }] }
+  });
+  const [stored] = await listBannerCreatives(projectRoot);
+
+  assert.equal(prompts.length, 2);
+  assert.match(prompts[0], /正式ワードマークは「Sample Smile」/);
+  assert.match(prompts[1], /正式ワードマークは「Sample Smile」/);
+  assert.equal(stored.logoVerification.status, "verified");
+  assert.equal(stored.productionStatus, "completed");
+  assert.equal(stored.imageGenerationAudit.attempts[0].outcome, "logo_mismatch");
+});
+
+test("テンプレにロゴ枠がなくても選択ロゴ例外領域で正式表記を検証する", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-logo-fallback-region-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "assets"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "assets", "sample-brand.png"), Buffer.from("source-logo"));
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env["OPENAI_API_KEY"] = "test-key";
+  t.after(() => {
+    if (originalKey === undefined) delete process.env["OPENAI_API_KEY"];
+    else process.env["OPENAI_API_KEY"] = originalKey;
+  });
+
+  const created = await addBannerCreative(projectRoot, {
+    productId: "p1",
+    strategyId: "s1",
+    title: "logo fallback region",
+    logoImagePaths: ["assets/sample-brand.png"]
+  });
+  const banner = await updateBannerCreative(projectRoot, created.id, {
+    imageText: "毎日をもっと便利に",
+    promptJson: {
+      productName: "Sample Smile",
+      basic: { size: "1024x1024" },
+      templateStructureContract: {
+        closed: true,
+        zoneCount: 1,
+        elementCount: 1,
+        typeCounts: { text: 1, image: 0, shape: 0 },
+        zones: [{ elements: [{ slotId: "z1e1", type: "text", role: "headline" }] }]
+      },
+      zones: [{ name: "main", elements: [{ slotId: "z1e1", type: "text", role: "headline", content: "毎日をもっと便利に" }] }]
+    }
+  });
+  const prompts = [];
+  const observedRegions = [];
+  const fetchImpl = async (_url, options) => {
+    prompts.push(options.body.get("prompt"));
+    return new Response(JSON.stringify({ data: [{ b64_json: PNG_BYTES.toString("base64") }] }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+  const ocrReader = async (_root, _path, _attempt, options) => {
+    observedRegions.push(options.logoRegions);
+    return {
+      ocrText: "毎日をもっと便利に Sample Smile",
+      ocrError: "",
+      logoRegionTexts: [{ slotId: options.logoRegions[0].slotId, text: "Sample Smile" }]
+    };
+  };
+
+  await generateBannerImageWithGptImage2(projectRoot, banner, {
+    fetchImpl,
+    ocrReader,
+    product: { id: "p1", name: "Sample Smile", images: [{ id: "img1", path: "assets/sample-brand.png", role: "logo", officialWordmark: "Sample Smile" }] }
+  });
+  const [stored] = await listBannerCreatives(projectRoot);
+
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0], /selected-logo-fallback-1/);
+  assert.equal(observedRegions[0][0].slotId, "selected-logo-fallback-1");
+  assert.equal(stored.logoVerification.status, "verified");
+  assert.equal(stored.productionStatus, "completed");
+});
+
+test("ロゴ再生成後も正式表記が欠ける場合は失敗にせず警告完了する", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-logo-warning-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  await fs.mkdir(path.join(projectRoot, "assets"), { recursive: true });
+  await fs.writeFile(path.join(projectRoot, "assets", "sample-brand.png"), Buffer.from("source-logo"));
+  const originalKey = process.env.OPENAI_API_KEY;
+  process.env["OPENAI_API_KEY"] = "test-key";
+  t.after(() => {
+    if (originalKey === undefined) delete process.env["OPENAI_API_KEY"];
+    else process.env["OPENAI_API_KEY"] = originalKey;
+  });
+
+  const created = await addBannerCreative(projectRoot, { productId: "p1", strategyId: "s1", title: "logo warning", logoImagePaths: ["assets/sample-brand.png"] });
+  const banner = await updateBannerCreative(projectRoot, created.id, {
+    imageText: "毎日をもっと便利に",
+    promptJson: {
+      productName: "Sample Smile",
+      basic: { size: "1024x1024" },
+      templateStructureContract: { closed: true, zoneCount: 1, elementCount: 1, typeCounts: { text: 0, image: 1, shape: 0 }, zones: [{ elements: [{ slotId: "z1e1", type: "image", role: "logo", messageRole: "logo", position: { top: "3%", left: "80%" }, size: "17% width x 7% height" }] }] },
+      zones: [{ name: "brand", elements: [{ slotId: "z1e1", type: "image", role: "logo", messageRole: "logo", position: { top: "3%", left: "80%" }, size: "17% width x 7% height" }] }]
+    }
+  });
+  let requestCount = 0;
+  const fetchImpl = async () => {
+    requestCount += 1;
+    return new Response(JSON.stringify({ data: [{ b64_json: PNG_BYTES.toString("base64") }] }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const ocrReader = async (_root, _path, _attempt, options) => ({
+    ocrText: "毎日をもっと便利に Sample Smile",
+    ocrError: "",
+    logoRegionTexts: [{ slotId: options.logoRegions[0].slotId, text: "SMILE" }]
+  });
+  await generateBannerImageWithGptImage2(projectRoot, banner, {
+    fetchImpl,
+    ocrReader,
+    product: { id: "p1", name: "Sample Smile", images: [{ id: "img1", path: "assets/sample-brand.png", role: "logo", officialWordmark: "Sample Smile" }] }
+  });
+  const [stored] = await listBannerCreatives(projectRoot);
+
+  assert.equal(requestCount, 2);
+  assert.equal(stored.imageGenerationStatus, "completed");
+  assert.equal(stored.productionStatus, "completed_with_warnings");
+  assert.equal(stored.logoVerification.status, "missing");
+  assert.ok(stored.warnings.some((warning) => warning.type === "logo_mismatch"));
+});

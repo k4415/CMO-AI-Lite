@@ -97,7 +97,7 @@ export async function deleteProduct(projectRoot, productId) {
 
 const PRODUCT_IMAGE_ROLES = ["product", "logo", "other"];
 
-export async function addProductImage(projectRoot, productId, { fileName, dataBase64, role, label } = {}) {
+export async function addProductImage(projectRoot, productId, { fileName, dataBase64, role, label, officialWordmark } = {}) {
   await ensureResearchData(projectRoot);
   if (!dataBase64) throw new Error("画像データがありません。");
 
@@ -116,6 +116,7 @@ export async function addProductImage(projectRoot, productId, { fileName, dataBa
     role: PRODUCT_IMAGE_ROLES.includes(role) ? role : "product",
     path: `${relDir}/${finalName}`,
     label: clean(label),
+    officialWordmark: clean(officialWordmark),
     createdAt: now
   };
   return withFileLock(path.join(projectRoot, PRODUCTS_PATH), async () => {

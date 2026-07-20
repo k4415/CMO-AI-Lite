@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getOpenAiKey } from "./settings-store.js";
 import { completeBannerImageEdit, completeBannerImageGeneration, failBannerImageGeneration, updateBannerCreative } from "./banner-store.js";
-import { recognizeBannerText, verifyCopyIntegrity } from "./banner-ocr.js";
+import { recognizeBannerEvidence, recognizeBannerText, verifyCopyIntegrity } from "./banner-ocr.js";
+import {
+  buildClosedStructureInstruction,
+  buildSelectedAssetOverrideInstruction,
+  buildSelectedAssetOverridePolicyFromInputImages
+} from "./banner-template-structure.js";
+import { logoRegionsFromContract, resolveLogoIdentity, selectedLogoFallbackElements, verifyLogoIdentity } from "./logo-identity.js";
 
 export async function generateBannerImageWithGptImage2(projectRoot, banner, context = {}) {
   const { key } = await getOpenAiKey();
@@ -15,7 +21,7 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
   let inputImages = [];
   try {
     const sourceImages = await loadBannerInputImages(projectRoot, banner);
-    await enrichLogoInputText(projectRoot, sourceImages);
+    await enrichLogoInputIdentity(projectRoot, sourceImages, context.product || {});
     inputImages = sourceImages;
   } catch (error) {
     const requestError = normalizeImageRequestError(error);
@@ -33,6 +39,10 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
     selectedAttempt: null,
     attempts: []
   };
+  const logoIdentities = inputImages
+    .filter((image) => image.role === "brand-logo")
+    .map((image) => image.logoIdentity || resolveLogoIdentity({ inputImage: image, selectedLogoCount: inputImages.filter((item) => item.role === "brand-logo").length }));
+  const logoRegions = logoRegionsFromContract(banner.promptJson?.templateStructureContract, size, { selectedLogoCount: logoIdentities.length });
 
   for (let generationAttempt = 1; generationAttempt <= 2; generationAttempt += 1) {
     const prompt = generationAttempt === 1
@@ -52,10 +62,14 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
       }
       const saved = await saveGeneratedImage(projectRoot, banner.id, data.data?.[0] || {}, generationAttempt);
       relativePath = saved.relativePath;
-      const ocr = await ocrReader(projectRoot, relativePath, generationAttempt);
-      const logoVerification = logoVerificationResult(inputImages, ocr.ocrText);
+      const ocr = await ocrReader(projectRoot, relativePath, generationAttempt, { logoRegions });
+      const logoVerification = verifyLogoIdentity({
+        identities: logoIdentities,
+        logoRegionTexts: ocr.logoRegionTexts,
+        ocrError: ocr.ocrError
+      });
       const copyIntegrityCheck = verifyCopyIntegrity(banner.imageText, ocr.ocrText, { ocrError: ocr.ocrError });
-      const mismatch = classifyImageOutputMismatch(copyIntegrityCheck);
+      const mismatch = classifyImageOutputMismatch(copyIntegrityCheck, logoVerification);
       imageGenerationAudit.attempts.push(buildImageAttemptAudit({
         generationAttempt,
         prompt,
@@ -63,15 +77,18 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
         requestId,
         relativePath,
         copyIntegrityCheck,
-        outcome: mismatch.shouldRetry ? "gross_mismatch" : "accepted"
+        logoVerification,
+        outcome: mismatch.shouldRetry ? (mismatch.terminalFailure ? "gross_mismatch" : "logo_mismatch") : "accepted"
       }));
       if (mismatch.shouldRetry) {
         if (generationAttempt < 2) continue;
-        const error = new Error("生成画像が依頼内容と無関係だったため、短縮プロンプトで再生成しましたが改善しませんでした。");
-        error.code = mismatch.code;
-        await persistImageGenerationFailure(projectRoot, banner, attemptId, error, imageGenerationAudit);
-        error.imageFailurePersisted = true;
-        throw error;
+        if (mismatch.terminalFailure) {
+          const error = new Error("生成画像が依頼内容と無関係だったため、短縮プロンプトで再生成しましたが改善しませんでした。");
+          error.code = mismatch.code;
+          await persistImageGenerationFailure(projectRoot, banner, attemptId, error, imageGenerationAudit);
+          error.imageFailurePersisted = true;
+          throw error;
+        }
       }
       imageGenerationAudit.selectedAttempt = generationAttempt;
       imageGenerationAudit.completedAt = new Date().toISOString();
@@ -139,7 +156,7 @@ async function saveGeneratedImage(projectRoot, bannerId, image, generationAttemp
   throw new Error("gpt-image-2のレスポンスに画像データがありませんでした。");
 }
 
-function buildImageAttemptAudit({ generationAttempt, prompt, startedAt, requestId = "", relativePath = "", copyIntegrityCheck = null, outcome, errorMessage = "" }) {
+function buildImageAttemptAudit({ generationAttempt, prompt, startedAt, requestId = "", relativePath = "", copyIntegrityCheck = null, logoVerification = null, outcome, errorMessage = "" }) {
   const completedAt = new Date();
   return {
     attempt: generationAttempt,
@@ -155,6 +172,11 @@ function buildImageAttemptAudit({ generationAttempt, prompt, startedAt, requestI
       copyIntegrityStatus: copyIntegrityCheck.status,
       expectedCopyCount: copyIntegrityCheck.expected?.length || 0,
       missingCopyCount: copyIntegrityCheck.missing?.length || 0
+    } : {}),
+    ...(logoVerification?.required ? {
+      logoVerificationStatus: logoVerification.status,
+      expectedLogoCount: logoVerification.expected?.length || 0,
+      missingLogoCount: logoVerification.missing?.length || 0
     } : {}),
     ...(errorMessage ? { errorMessage } : {})
   };
@@ -336,12 +358,26 @@ function mergeCopyIntegrityNotes(existing, copyIntegrityCheck) {
   return [prior, "【コピー完全性チェック】\n" + result, copyIntegrityCheck.note].filter(Boolean).join("\n\n");
 }
 
+function mergeLogoVerificationNotes(existing, logoVerification) {
+  const prior = String(existing || "").replace(/\n*【ロゴ同一性チェック】[\s\S]*$/, "").trim();
+  if (!logoVerification?.required) return prior;
+  const result = logoVerification.status === "verified"
+    ? `正式ロゴ表記をロゴ領域で確認しました: ${(logoVerification.expected || []).join(" / ")}`
+    : (logoVerification.status === "not_verifiable"
+      ? `目視確認が必要です: ${logoVerification.note || "ロゴ領域OCRで確認できませんでした。"}`
+      : `不足・相違: ${(logoVerification.missing || []).join(" / ")} / ロゴ領域OCR: ${(logoVerification.observed || []).join(" / ") || "文字を検出できませんでした"}`);
+  return [prior, "【ロゴ同一性チェック】\n" + result, logoVerification.note].filter(Boolean).join("\n\n");
+}
+
 export function normalizeBannerImageCompletionPatch({ relativePath, banner = {}, existingImages = null, strategyCheck = null, copyIntegrityCheck = null, logoVerification = null } = {}) {
   const priorImages = Array.isArray(existingImages)
     ? existingImages
     : (Array.isArray(banner.images) && banner.images.length ? banner.images : (banner.generatedImagePath ? [banner.generatedImagePath] : []));
   const hasOcrMismatch = copyIntegrityCheck && copyIntegrityCheck.status !== "passed";
-  const warnings = Array.isArray(banner.warnings) ? [...banner.warnings] : [];
+  const hasLogoMismatch = Boolean(logoVerification?.required && logoVerification.status !== "verified");
+  const warnings = Array.isArray(banner.warnings)
+    ? banner.warnings.filter((warning) => !logoVerification || warning?.type !== "logo_mismatch")
+    : [];
   if (hasOcrMismatch) {
     const message = copyIntegrityCheck.status === "not_verifiable"
       ? "OCRで確認できないため目視確認が必要です。"
@@ -353,40 +389,60 @@ export function normalizeBannerImageCompletionPatch({ relativePath, banner = {},
       occurredAt: new Date().toISOString()
     });
   }
+  if (hasLogoMismatch) {
+    const slotIds = (logoVerification.regions || []).map((region) => region?.slotId).filter(Boolean).join(" / ") || "取得不能";
+    const expected = (logoVerification.expected || []).join(" / ") || "未解決";
+    const observed = (logoVerification.observed || []).filter(Boolean).join(" / ") || "文字を検出できませんでした";
+    const message = logoVerification.status === "not_verifiable"
+      ? `正式ロゴ表記「${expected}」を確認できません。対象ロゴ枠: ${slotIds} / ${logoVerification.note || "ロゴ領域OCRで確認できないため目視確認が必要です。"}`
+      : `ロゴ枠（${slotIds}）内で正式ロゴ表記「${expected}」を確認できません。検出: ${observed}`;
+    warnings.push({
+      type: "logo_mismatch",
+      stage: "image",
+      message,
+      occurredAt: new Date().toISOString()
+    });
+  }
   return {
     generatedImagePath: relativePath,
     images: [relativePath, ...priorImages.filter((item) => item !== relativePath)],
-    productionStatus: hasOcrMismatch ? "completed_with_warnings" : "completed",
+    productionStatus: hasOcrMismatch || hasLogoMismatch ? "completed_with_warnings" : "completed",
     warnings,
     strategyCheck,
     copyIntegrityCheck,
     ...(logoVerification ? { logoVerification } : {}),
-    reviewNotes: mergeCopyIntegrityNotes(
-      mergeStrategyCheckNotes(banner.reviewNotes, strategyCheck || { status: "passed", warnings: [], note: "" }),
-      copyIntegrityCheck
+    reviewNotes: mergeLogoVerificationNotes(
+      mergeCopyIntegrityNotes(
+        mergeStrategyCheckNotes(banner.reviewNotes, strategyCheck || { status: "passed", warnings: [], note: "" }),
+        copyIntegrityCheck
+      ),
+      logoVerification
     ),
     provider: "gpt-image-2"
   };
 }
 
-export function classifyImageOutputMismatch(copyIntegrityCheck = null) {
+export function classifyImageOutputMismatch(copyIntegrityCheck = null, logoVerification = null) {
   const expected = Array.isArray(copyIntegrityCheck?.expected) ? copyIntegrityCheck.expected.filter(Boolean) : [];
   const missing = Array.isArray(copyIntegrityCheck?.missing) ? copyIntegrityCheck.missing.filter(Boolean) : [];
   const actualText = String(copyIntegrityCheck?.actualText || "").trim();
   const allExpectedCopyMissing = expected.length >= 2 && missing.length === expected.length;
   const denseAlternativeContent = actualText.length >= 80 && actualText.split(/\r?\n/).filter((line) => line.trim()).length >= 3;
   const sharedBigramCount = countSharedTextBigrams(expected.join(" "), actualText);
-  const shouldRetry = copyIntegrityCheck?.status === "failed"
+  const grossMismatch = copyIntegrityCheck?.status === "failed"
     && allExpectedCopyMissing
     && denseAlternativeContent
     && sharedBigramCount < 2;
+  const logoMismatch = Boolean(logoVerification?.required && logoVerification.status === "missing");
+  const shouldRetry = grossMismatch || logoMismatch;
   return {
     shouldRetry,
-    code: shouldRetry ? "IMAGE_OUTPUT_UNRELATED" : "",
+    terminalFailure: grossMismatch,
+    code: grossMismatch ? "IMAGE_OUTPUT_UNRELATED" : (logoMismatch ? "LOGO_WORDMARK_MISMATCH" : ""),
     sharedBigramCount,
-    reason: shouldRetry
+    reason: grossMismatch
       ? "確定コピーがすべて欠落し、別内容のテキストが画像全体から検出されました。"
-      : ""
+      : (logoMismatch ? "ロゴ領域で正式ワードマークを確認できませんでした。" : "")
   };
 }
 
@@ -420,29 +476,26 @@ function normalizeImageRequestError(error) {
   return error instanceof Error ? error : new Error(String(error || "画像生成に失敗しました。"));
 }
 
-async function readGeneratedImageText(projectRoot, relativePath) {
+async function readGeneratedImageText(projectRoot, relativePath, _generationAttempt = 1, { logoRegions = [] } = {}) {
   if (!relativePath || /^https?:\/\//i.test(relativePath)) {
-    return { ocrText: "", ocrError: "画像URL形式のためローカルOCRを実行できませんでした" };
+    return { ocrText: "", logoRegionTexts: [], ocrError: "画像URL形式のためローカルOCRを実行できませんでした" };
   }
   try {
-    return { ocrText: await recognizeBannerText(path.join(projectRoot, relativePath)), ocrError: "" };
+    const evidence = await recognizeBannerEvidence(path.join(projectRoot, relativePath), { regions: logoRegions });
+    return { ...evidence, ocrError: "" };
   } catch (error) {
-    return { ocrText: "", ocrError: error.message || String(error) };
+    return { ocrText: "", logoRegionTexts: [], ocrError: error.message || String(error) };
   }
 }
 
 export function logoVerificationResult(inputImages, outputText) {
-  const expected = inputImages
-    .filter((image) => image.role === "brand-logo" && image.logoText)
-    .map((image) => image.logoText);
-  if (!expected.length) return { status: "not_verifiable", expected: [] };
-  const normalizedOutput = normalizeLogoText(outputText);
-  const missing = expected.filter((wordmark) => !normalizedOutput.includes(normalizeLogoText(wordmark)));
-  return { status: missing.length ? "missing" : "verified", expected, missing };
-}
-
-function normalizeLogoText(value) {
-  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const identities = (Array.isArray(inputImages) ? inputImages : [])
+    .filter((image) => image.role === "brand-logo")
+    .map((image) => image.logoIdentity || { officialWordmark: image.logoText || "", source: image.logoText ? "legacy.logoText" : "unresolved" });
+  return verifyLogoIdentity({
+    identities,
+    logoRegionTexts: identities.map((_, index) => ({ slotId: `legacy-${index + 1}`, text: String(outputText || "") }))
+  });
 }
 
 // gpt-image-2 only accepts real product/logo material via /v1/images/edits (multipart,
@@ -484,14 +537,25 @@ export async function loadBannerInputImages(projectRoot, banner) {
   return images;
 }
 
-async function enrichLogoInputText(projectRoot, inputImages) {
-  for (const image of inputImages.filter((item) => item.role === "brand-logo")) {
-    try {
-      const recognized = await recognizeBannerText(path.join(projectRoot, image.path));
-      image.logoText = extractLogoWordmark(recognized);
-    } catch {
-      image.logoText = "";
+async function enrichLogoInputIdentity(projectRoot, inputImages, product) {
+  const logoImages = inputImages.filter((item) => item.role === "brand-logo");
+  const productImages = Array.isArray(product?.images) ? product.images : [];
+  for (const image of logoImages) {
+    const asset = productImages.find((item) => String(item?.path || "") === String(image.path || "")) || {};
+    let observedInputText = "";
+    if (!String(asset.officialWordmark || "").trim() && !String(product?.brandName || product?.name || "").trim()) {
+      try {
+        observedInputText = await recognizeBannerText(path.join(projectRoot, image.path));
+      } catch {}
     }
+    image.asset = asset;
+    image.logoIdentity = resolveLogoIdentity({
+      inputImage: image,
+      product,
+      selectedLogoCount: logoImages.length,
+      observedInputText
+    });
+    image.logoText = image.logoIdentity.officialWordmark;
   }
 }
 
@@ -525,20 +589,28 @@ export function buildBannerImagePrompt(banner, inputImages = buildBannerInputIma
   const json = banner.promptJson || {};
   const basic = json.basic || {};
   const zones = Array.isArray(json.zones) ? json.zones : [];
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicyFromInputImages(inputImages);
+  const templateStructureInstruction = buildClosedStructureInstruction(json.templateStructureContract, selectedAssetPolicy);
   const hasLogoInput = inputImages.some((image) => image.role === "brand-logo");
+  const finalLogoInstruction = hasLogoInput
+    ? "【最終優先・ロゴ原本】ブランド名を文字で打ち直さず、添付された正式ロゴ画像そのものを欠落・改変・再描画せず表示する。対応する既存logo image枠があれば優先し、ない場合もユーザー選択素材の例外として視線順を壊さない最小限の位置へ必ず表示する。後から別画像を合成する前提にしない。"
+    : "";
   const zoneInstructions = zones.map((zone, index) => {
-    const elements = (zone.elements || []).map((element) => [
-      `- ${element.type || "element"} / role: ${element.role || ""}`,
-      element.content && !(hasLogoInput && isLogoElement(element)) ? `exact content: ${element.content}` : "",
-      hasLogoInput && isLogoElement(element) ? "content policy: use the attached official logo image itself; do not typeset or redraw the brand name" : "",
-      element.position ? `position: ${JSON.stringify(element.position)}` : "",
-      element.size ? `size: ${element.size}` : "",
-      element.font ? `font: ${element.font}` : "",
-      element.color ? `color: ${element.color}` : "",
-      element.effect ? `effect: ${element.effect}` : "",
-      element.targetChars ? `target chars: ${element.targetChars}` : "",
-      element.sourceReason ? `reason: ${element.sourceReason}` : ""
-    ].filter(Boolean).join("; "));
+    const elements = (zone.elements || []).map((element) => {
+      const selectedLogoSlot = hasLogoInput && isLogoElement(element);
+      return [
+        `- ${element.type || "element"} / role: ${element.role || ""}`,
+        element.content && !selectedLogoSlot ? `exact content: ${element.content}` : "",
+        selectedLogoSlot ? "content policy: use the attached official logo image itself; do not typeset, redraw, recolor, crop, stylize, or replace the brand mark" : "",
+        element.position ? `position: ${JSON.stringify(element.position)}` : "",
+        element.size ? `size: ${element.size}` : "",
+        element.font && !selectedLogoSlot ? `font: ${element.font}` : "",
+        element.color && !selectedLogoSlot ? `color: ${element.color}` : "",
+        element.effect && !selectedLogoSlot ? `effect: ${element.effect}` : "",
+        element.targetChars && !selectedLogoSlot ? `target chars: ${element.targetChars}` : "",
+        element.sourceReason ? `reason: ${element.sourceReason}` : ""
+      ].filter(Boolean).join("; ");
+    });
     return [
       `Zone ${index + 1}: ${zone.name || ""}`,
       `Position: ${zone.position || ""}`,
@@ -551,7 +623,8 @@ export function buildBannerImagePrompt(banner, inputImages = buildBannerInputIma
   return [
     "日本語のダイレクト広告バナーを制作してください。",
     "モデルはgpt-image-2を使用しています。",
-    buildAttachedImageInstruction(inputImages),
+    templateStructureInstruction,
+    buildAttachedImageInstruction(inputImages, json.templateStructureContract),
     "画像内テキストは後処理で合成せず、画像生成時点で自然に配置してください。",
     "ただし日本語は読みやすさを最優先し、文字化け、崩れ、重なり、切れを避けてください。",
     "基本仕様: " + JSON.stringify(basic),
@@ -577,13 +650,15 @@ export function buildBannerImagePrompt(banner, inputImages = buildBannerInputIma
     "禁止事項:",
     normalizeList(json.negativeRules).join("、"),
     "最終品質条件: 余白を確保し、視線誘導を明確にし、CTAを読みやすく目立たせる。効果保証や医療的治療断定は避ける。",
-    hasLogoInput ? "【最終優先・ロゴ原本】プロンプト内にロゴ名の文字列、代替フォント、または『ロゴが使えない場合』という指示があっても無視する。ブランド名を文字で打ち直さず、添付された正式ロゴ画像そのものを、欠落・改変・再描画せずバナー内に表示する。後から別画像を合成する前提にしない。" : ""
+    finalLogoInstruction
   ].filter(Boolean).join("\n");
 }
 
 export function buildBannerImageRecoveryPrompt(banner, inputImages = buildBannerInputImageManifest(banner)) {
   const json = banner.promptJson || {};
   const zones = Array.isArray(json.zones) ? json.zones : [];
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicyFromInputImages(inputImages);
+  const templateStructureInstruction = buildClosedStructureInstruction(json.templateStructureContract, selectedAssetPolicy);
   const hasLogoInput = inputImages.some((image) => image.role === "brand-logo");
   const imageText = removeLogoElementText(banner.imageText || collectZoneText(zones), zones, hasLogoInput);
   const zoneSummary = zones.map((zone, index) => {
@@ -596,7 +671,8 @@ export function buildBannerImageRecoveryPrompt(banner, inputImages = buildBanner
   return [
     "【再生成専用・最優先】以下の商品だけを扱う、日本語のダイレクト広告バナーを1枚制作してください。",
     "教育ポスター、百科事典風の解説図、学習教材、英語主体のインフォグラフィック、雲・脳・物語構造など依頼と無関係なテーマを生成しないでください。",
-    buildAttachedImageInstruction(inputImages),
+    templateStructureInstruction,
+    buildAttachedImageInstruction(inputImages, json.templateStructureContract),
     `商品: ${json.productName || ""}`,
     `対象: ${json.target || ""}`,
     `伝える便益: ${json.benefit || ""}`,
@@ -608,7 +684,9 @@ export function buildBannerImageRecoveryPrompt(banner, inputImages = buildBanner
     "配置:",
     zoneSummary,
     "コピーは画像生成時に直接描画し、読みやすい日本語、明確な視線誘導、十分な余白を確保してください。",
-    hasLogoInput ? "添付された正式ロゴ画像を改変・再描画せず、そのまま表示してください。" : ""
+    hasLogoInput
+      ? "対応する既存logo image枠があれば優先し、なくてもユーザー選択素材の例外として、添付された正式ロゴ画像を改変・再描画せず必ず表示してください。"
+      : ""
   ].filter(Boolean).join("\n");
 }
 
@@ -634,25 +712,44 @@ function removeLogoElementText(text, zones, enabled) {
     .join("\n");
 }
 
-function buildAttachedImageInstruction(inputImages) {
+function buildAttachedImageInstruction(inputImages, templateStructureContract = null) {
   if (!inputImages.length) return "";
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicyFromInputImages(inputImages);
   const rows = inputImages.map((image) => {
     const position = `${image.ordinal || inputImages.indexOf(image) + 1}枚目（${image.fileName || path.basename(image.path || "image")}）`;
     if (image.role === "brand-logo") {
-      const wordmark = image.logoText ? ` 原本から判読した正式ワードマークは「${image.logoText}」。この綴りを1文字も変更せず、別の語を付加しない。` : "";
-      return `- ${position}: 正式なブランドロゴ。バナー内に1回以上、判読できる大きさで必ず表示する。文字・図形・色・縦横比を変更せず、再描画や類似ロゴへの置換を禁止する。${wordmark}`;
+      const officialWordmark = logoWordmarkForInput(image);
+      const wordmark = officialWordmark ? ` 正式ワードマークは「${officialWordmark}」。検証用の同一性情報として扱い、この綴りを1文字も変更せず、別の語を付加しない。ワードマークを新規に組版せず、添付画像内の原本を使う。` : "";
+      return `- ${position}: 正式なブランドロゴ。バナー内に1回以上、判読できる大きさで必ず表示する。文字・図形・色・縦横比を変更せず、切り抜き・単色化・再描画・類似ロゴへの置換を禁止する。${wordmark}`;
     }
-    if (image.role === "product") return `- ${position}: 実際の商品写真。形状・パッケージ・ラベルを維持して主要被写体として使用する。`;
-    return `- ${position}: その他の参考素材。主に人物・背景・使用シーンの参考として使用する。`;
+    if (image.role === "product") return `- ${position}: 実際の商品写真。形状・パッケージ・ラベルを維持し、完成画像へ必ず反映して主要被写体として使用する。`;
+    return `- ${position}: その他の選択参考素材。人物・背景・使用シーン等の役割を維持し、完成画像へ必ず反映する。`;
   });
   const hasLogo = inputImages.some((image) => image.role === "brand-logo");
-  const logoWords = inputImages.filter((image) => image.role === "brand-logo" && image.logoText).map((image) => image.logoText);
+  const fallbackLogoElements = selectedLogoFallbackElements(
+    templateStructureContract,
+    inputImages.filter((image) => image.role === "brand-logo").length
+  );
+  const fallbackLogoInstructions = fallbackLogoElements.map((element) => (
+    `- ${element.slotId}: 対応するテンプレlogo枠がない選択ロゴを、top ${element.position.top} / left ${element.position.left} / width 29% / height 12% の検証可能な領域へ配置する。背景とのコントラストを確保し、他要素を増やさない。`
+  ));
+  const logoWords = inputImages.filter((image) => image.role === "brand-logo").map(logoWordmarkForInput).filter(Boolean);
   return [
+    buildSelectedAssetOverrideInstruction(selectedAssetPolicy),
     "【添付画像の役割と必須条件】",
     ...rows,
-    hasLogo ? "最優先条件: ブランドロゴを省略しない。ロゴの忠実な表示が、装飾・テンプレ構造・他の参考画像より優先される。" : "",
+    ...fallbackLogoInstructions,
+    hasLogo
+      ? (templateStructureContract?.closed
+        ? "最優先条件: 対応する既存logo image枠があれば優先する。枠がない場合も、ユーザー選択素材の例外としてブランドロゴを省略しない。"
+        : "最優先条件: ブランドロゴを省略しない。ロゴの忠実な表示が、装飾・他の参考画像より優先される。")
+      : "",
     logoWords.length ? `正式ワードマーク: ${logoWords.join(" / ")}。商品カテゴリへの置換・追記は禁止。正式ワードマーク自体に「FC」が含まれない場合、ロゴ名の末尾へ「FC」を絶対に追加しない。` : ""
   ].filter(Boolean).join("\n");
+}
+
+function logoWordmarkForInput(image) {
+  return String(image?.logoIdentity?.officialWordmark || image?.logoText || "").trim();
 }
 
 function normalizeImageSize(value) {

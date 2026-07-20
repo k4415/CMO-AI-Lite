@@ -1668,6 +1668,8 @@ body.resizingDetailPane { cursor: col-resize; user-select: none; }
 .productImageGridRich .productImageMeta .tableSelect, .productImageGridRich .productImageMeta .tableInput { min-width: 0; width: 100%; }
 .productImageGridRich .productImageMeta .tableSelect, .productImageGridRich .productImageMeta .tableInput, .productImageGridRich .productImageMeta .iconDelete { min-height: 42px; }
 .productImageGridRich .productImageLabelInput { grid-column: 1 / -1; grid-row: 2; }
+.productImageGridRich .productImageWordmarkField { grid-column: 1 / -1; display: grid; gap: 4px; color: var(--slate-600); font-size: 12px; }
+.productImageGridRich .productImageWordmarkField .tableInput { width: 100%; }
 .productProfileHeroInfoOnly { grid-template-columns: minmax(0, 1fr); }
 .productProfileHeroInfoOnly .productProfileInfo { max-width: 920px; }
 .productImagesLibrary { margin-top: 0; }
