@@ -1,14 +1,16 @@
-# CMO AI Lite
+# CMO AI Lite （無料ダイレクトマーケAIシステム）
 
-CMO AI Liteは、広告運用者がローカルPCで「前提情報 → 事実リサーチ → WHO-WHAT戦略 → バナー画像テンプレ → バナー制作」を回すためのソース公開版です。案件データはすべて手元のフォルダにJSONとして保存されます。
+CMO AI Liteは、広告運用者が「前提情報 → 事実リサーチ → WHO-WHAT戦略 → バナー画像テンプレ → バナー制作」を実施するためのダイレクトマーケティングに特化したAIシステムです。
+データはすべてローカルPCのフォルダに保存されます。
 
-[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://example.com)
+[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)
 
 ## ダウンロード
 
 **[CMO AI Lite 最新版をダウンロード（CMO-AI-Lite.zip）](https://github.com/k4415/CMO-AI-Lite/releases/latest/download/CMO-AI-Lite.zip)**
 
-ZIPを解凍すると `CMO-AI-Lite` フォルダになります。Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git` でも取得できます。
+ZIPを解凍すると `CMO-AI-Lite` フォルダになります。
+Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git` でも取得できます。
 
 ## できること
 
@@ -57,6 +59,9 @@ npm run dev
 5. **バナー案を追加** — 戦略・テンプレ・参照画像を選び、最大5枚まで追加
 6. **画像生成** — `gpt-image-2` で完成画像を出力
 
+セットアップマニュアル・利用マニュアルはLINEにてお配りしています。
+**[LINEに登録してマニュアルを受け取る](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)**
+
 ## Claude Code / Codex から使う
 
 手元のターミナルで Claude Code または Codex をこのフォルダで起動し、自然言語で指示します。
@@ -83,25 +88,6 @@ npm run dev
 
 案件フォルダ `projects/*` は `.gitignore` 対象です。バックアップはフォルダごとコピーしてください。
 
-## 環境変数（すべて任意）
-
-| 変数 | 説明 |
-| --- | --- |
-| `OPENAI_API_KEY` | UI設定の代わりにOS環境変数でキーを渡す |
-| `ANTHROPIC_API_KEY` | UI設定の代わりにOS環境変数でAnthropicキーを渡す |
-| `PORT` | UIポート（既定 5173） |
-| `CMOAI_TEXT_MODEL` | テキスト生成モデル上書き |
-| `CMOAI_BANNER_COPY_MODEL` | バナー Stage 1 copyplan 専用モデル上書き |
-| `CMOAI_BANNER_COPY_TIMEOUT_MS` | バナー Stage 1 copyplan のタイムアウト（ミリ秒） |
-| `CMOAI_BANNER_COPY_EFFORT` | バナー Stage 1 copyplan の思考深度 |
-| `CMOAI_IMAGE_CONCURRENCY` | 画像生成の同時実行数 |
-| `CHROME_PATH` | LPスクショ用Chrome/Edgeのパス |
-| `CMOAI_LP_TRANSCRIBE_MAX_SLICES` | LPスクショ文字起こし枚数上限 |
-| `CMOAI_OCR_MODE` | OCRモード |
-| `GEMINI_API_KEY` | Gemini APIキー（OCR等） |
-
-`.env` ファイルは自動読み込みされません。`.env.example` を参照してください。
-
 ## テンプレデータの保守
 
 - **正本**: `data/ad-templates.json`（AI解析データを含む100件）
@@ -118,3 +104,9 @@ npm run dev
 ## ライセンス
 
 `LICENSE`（CMO AI Lite Source-Available License Version 1.0）を参照。第三者ライブラリは `THIRD_PARTY_NOTICES.md` を参照。
+
+## 開発者
+鴻上善彦（YoshihikoKokami） — CMO AI開発者、株式会社Icra 代表
+
+X: https://x.com/k_4415
+note：https://note.com/k4415
