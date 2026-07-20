@@ -105,6 +105,15 @@ const forbiddenContentPatterns = [
 
 const sidebarHelpUrl = "https://icra-marketing-space.notion.site/CMO-AI-Lite-3a32e0f0cbe880a09438cac0edd3e803";
 
+const proPromotionPatterns = [
+  /CMO AI Pro/,
+  /https:\/\/cmoai\.jp\//,
+  /Pro専用/,
+  /より多機能なクラウド版/
+];
+
+const publicContentTargets = ["README.md", "src/ui", "docs"];
+
 const scanDirs = ["src", "config", "docs", "tests", "AGENTS.md", "CLAUDE.md", "DESIGN.md", "README.md", ".agents", ".claude", "projects/_template"];
 
 test("removed Pro/N=1 files are absent", async () => {
@@ -118,6 +127,22 @@ test("sidebar removes the CMO AI Pro link and uses the approved help URL", async
   assert.doesNotMatch(indexHtml, /CMO AI Pro|navProLink|navItemBadge/);
   assert.ok(indexHtml.includes(`id="sidebarHelpCard" class="sidebarHelpCard" href="${sidebarHelpUrl}"`));
   assert.equal(indexHtml.split(sidebarHelpUrl).length - 1, 1);
+});
+
+test("public docs and UI contain no CMO AI Pro promotion", async () => {
+  const files = [];
+  for (const target of publicContentTargets) {
+    const fullPath = path.join(root, target);
+    const stat = await fs.stat(fullPath);
+    files.push(...(stat.isDirectory() ? await walkFiles(target, [".js", ".md", ".html", ".css"]) : [fullPath]));
+  }
+  for (const file of files) {
+    const relative = path.relative(root, file);
+    const content = await fs.readFile(file, "utf8");
+    for (const pattern of proPromotionPatterns) {
+      assert.doesNotMatch(content, pattern, `${relative} contains Pro promotion ${pattern}`);
+    }
+  }
 });
 
 test("internal LP research fragments remain in core modules", async () => {

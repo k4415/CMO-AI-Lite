@@ -1127,7 +1127,7 @@ function onboardingAgentBodyHtml() {
     + '<p class="onboardingAgentIntro">このフォルダを手元のClaude Code / Codexで開くと、自然言語の指示だけで同じフローを実行できます。</p>'
     + '<pre class="onboardingAgentCode"><code>cd CMO-AI-Lite\nclaude   # または codex</code></pre>'
     + '<p class="onboardingAgentExample">例:「LP: https://example.com で案件を作ってバナー10案作って」</p>'
-    + '<p class="onboardingAgentNote">テキスト生成はエージェントのサブスク内で実行され、OpenAI課金は画像生成のみ。詳しくは <a href="https://cmoai.jp/" target="_blank" rel="noopener noreferrer">CMO AI</a> の案内を参照。</p>'
+    + '<p class="onboardingAgentNote">テキスト生成はエージェントのサブスク内で実行され、OpenAI課金は画像生成のみです。</p>'
     + '</div>';
 }
 

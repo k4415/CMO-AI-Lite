@@ -2616,7 +2616,6 @@ body.resizingDetailPane { cursor: col-resize; user-select: none; }
   overflow-x: auto;
 }
 .onboardingAgentNote { margin: 0; font-size: 11px; color: var(--text-tertiary); }
-.onboardingAgentNote a { color: var(--accent-600); }
 
 /* ==========================================================================
    スケルトンローディング(バッチV: マイクロインタラクション)

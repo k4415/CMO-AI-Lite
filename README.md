@@ -104,7 +104,7 @@ npm run dev
 
 - **正本**: `data/ad-templates.json`（AI解析データを含む100件）
 - **manifest**: `data/default-ad-templates.csv`（画像・タイトル等の配布用。JSON再生成元ではない）
-- **保守コマンド**: `npm run templates:sanitize-bundled` — 現在のJSONから bundled 100件を残し、Pro専用フィールドだけを除去
+- **保守コマンド**: `npm run templates:sanitize-bundled` — 現在のJSONから bundled 100件を残し、Lite配布対象外のフィールドだけを除去
 
 ## トラブルシューティング
 
@@ -112,10 +112,6 @@ npm run dev
 - **Anthropic APIキーが未設定でバナー生成が止まる** — 設定画面で保存するか `ANTHROPIC_API_KEY` を設定
 - **LPスクリーンショットが撮れない** — `CHROME_PATH` を設定。HTML本文のみでも続行可能
 - **ポート使用中** — `PORT=5174 npm run dev`
-
-## CMO AI Pro
-
-より多機能なクラウド版は [CMO AI Pro（https://cmoai.jp/）](https://cmoai.jp/) を参照してください。
 
 ## ライセンス
 
