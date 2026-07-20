@@ -2,6 +2,8 @@
 
 CMO AI Liteは、広告運用者がローカルPCで「前提情報 → 事実リサーチ → WHO-WHAT戦略 → バナー画像テンプレ → バナー制作」を回すためのソース公開版です。案件データはすべて手元のフォルダにJSONとして保存されます。
 
+[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://example.com)
+
 ## ダウンロード
 
 **[CMO AI Lite 最新版をダウンロード（CMO-AI-Lite.zip）](https://github.com/k4415/CMO-AI-Lite/releases/latest/download/CMO-AI-Lite.zip)**
