@@ -12,6 +12,7 @@ import {
 } from "../src/core/banner-store.js";
 import { hashCopyBrief } from "../src/core/banner-copy-hash.js";
 import { generateBannerCreativeProposal, reapplyLockedSlotTexts } from "../src/core/banner-ai.js";
+import { buildBannerImagePrompt } from "../src/core/openai-image.js";
 
 test("prompt generation audit survives banner storage normalization", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-prompt-audit-store-"));
@@ -28,6 +29,59 @@ test("prompt generation audit survives banner storage normalization", async (t) 
 
   const stored = (await listBannerCreatives(projectRoot)).find((item) => item.id === banner.id);
   assert.deepEqual(stored.promptGenerationAudit, { version: 1, modelDesignCalls: 1, httpAttempts: [{ status: 200 }] });
+});
+
+test("colorDecision version 2と旧形式・未設定を包み直さず保存して再読込できる", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-color-decision-store-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  const palette = { main: "#16324F", sub: "#FFFFFF", accent: "#F28C28", background: "#F7FAFC" };
+  const version2 = await addBannerCreative(projectRoot, {
+    title: "v2",
+    productId: "product-1",
+    strategyId: "strategy-1",
+    colorDecision: {
+      version: 2,
+      palette,
+      source: "who_what_inference",
+      contractReview: { status: "passed", unexpectedHex: [], unexpectedNamedColorPaths: [] }
+    }
+  });
+  const version1 = await addBannerCreative(projectRoot, {
+    title: "v1",
+    productId: "product-1",
+    strategyId: "strategy-1",
+    colorDecision: { source: "safe_default", palette, ignoredTemplatePalette: true }
+  });
+  const missing = await addBannerCreative(projectRoot, { title: "missing", productId: "product-1", strategyId: "strategy-1" });
+
+  const stored = await listBannerCreatives(projectRoot);
+  assert.deepEqual(stored.find((item) => item.id === version2.id).colorDecision, version2.colorDecision);
+  assert.deepEqual(stored.find((item) => item.id === version1.id).colorDecision, version1.colorDecision);
+  assert.equal(stored.find((item) => item.id === missing.id).colorDecision, null);
+});
+
+test("画像promptはversion 2のカラー監査不合格・palette不一致をAPI前に拒否する", () => {
+  const palette = { main: "#16324F", sub: "#FFFFFF", accent: "#F28C28", background: "#F7FAFC" };
+  const base = {
+    promptJson: { colorScheme: palette, zones: [] },
+    colorDecision: { version: 2, palette, contractReview: { status: "passed" } }
+  };
+
+  assert.doesNotThrow(() => buildBannerImagePrompt(base, []));
+  assert.throws(
+    () => buildBannerImagePrompt({ ...base, colorDecision: { ...base.colorDecision, contractReview: { status: "failed" } } }, []),
+    (error) => error.code === "PROMPT_COLOR_CONTRACT_VIOLATION" && error.restartNode === "prompt"
+  );
+  assert.throws(
+    () => buildBannerImagePrompt({
+      ...base,
+      promptJson: { colorScheme: { ...palette, accent: "#2563EB" }, zones: [] }
+    }, []),
+    (error) => error.code === "PROMPT_COLOR_DECISION_MISMATCH" && error.restartNode === "prompt"
+  );
+  assert.doesNotThrow(() => buildBannerImagePrompt({ promptJson: { zones: [] }, colorDecision: { source: "safe_default" } }, []));
+  assert.doesNotThrow(() => buildBannerImagePrompt({ promptJson: { zones: [] } }, []));
 });
 
 test("prompt generation persists success and failure audits", async (t) => {

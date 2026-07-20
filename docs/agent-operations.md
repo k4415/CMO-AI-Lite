@@ -108,7 +108,7 @@ POST /api/ad-templates/template-image  {"project":"...","templateId":"..."}
 
 Preflight → Stage 1(copyBrief / Anthropic) → Stage 2(promptJson / OpenAI) → 画像生成(gpt-image-2 / OpenAI) の順。詳細は `.claude/skills/cmoai-banner/SKILL.md` を参照。
 
-追加指示は表現レギュレーションより優先する。
+配色は`追加指示・修正指示 > 表現レギュレーション／正式ブランド指定 > 保存済みWHO-WHAT colorInference > テンプレカラー > safe default`の順にフィールド単位で決定する。既存WHO-WHATに`colorInference`がなければ`insufficient`としてテンプレへフォールバックし、バナー生成中にカラー専用AIを追加しない。選択ロゴ・商品画像・その他画像は原本色を維持する。
 
 ## テンプレ選定
 

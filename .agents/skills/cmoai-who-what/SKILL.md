@@ -30,7 +30,7 @@ CMO AI Lite の WHO-WHAT スキル。API・データ配置は `docs/agent-operat
 
 ## 実行モード
 
-- **サブスク実行モード(エージェントの既定)**: OpenAI課金を使わず、自分(Claude Code / Codex)のモデルで生成する。`config/prompts/who-what.md` をシステムプロンプトとして読み、`who-what-ai.js` の `buildWhoWhatPrompt` と同じ入力(対象商品の商品マスターDB、関連する商品事実DB(直近80件)、表現レギュレーションDB(対象商品分、直近40件)、既存WHO-WHAT DB(対象商品分、直近20件))を自分で集めて、同じ出力JSON(`summary`, `warnings[]`, `proposals[]`(各: `segmentName`, `conceptName`(20文字目安), `targetAttributes`, `desire`, `decisionCriteria`, `alternatives`, `productConcept`, `usp`, `benefit`, `proof`, `offer`, `markdown`))を2〜3案作る。各 `proposals[]` を `POST /api/regulations/apply` に通してから、1件ずつ `POST /api/strategies`(`status` を省略すれば自動で `"proposed"` になり、既存の `/api/strategies/generate` と同じ「提案中」ステータスで保存される)で保存する。
+- **サブスク実行モード(エージェントの既定)**: OpenAI課金を使わず、自分(Claude Code / Codex)のモデルで生成する。`config/prompts/who-what.md` をシステムプロンプトとして読み、`who-what-ai.js` の `buildWhoWhatPrompt` と同じ入力(対象商品の商品マスターDB、関連する商品事実DB(直近80件)、表現レギュレーションDB(対象商品分、直近40件)、既存WHO-WHAT DB(対象商品分、直近20件))を自分で集めて、同じ出力JSON(`summary`, `warnings[]`, `proposals[]`(各: `segmentName`, `conceptName`(20文字目安), `targetAttributes`, `desire`, `decisionCriteria`, `alternatives`, `productConcept`, `usp`, `benefit`, `proof`, `offer`, `markdown`, `colorInference`))を2〜3案作る。`colorInference`は完成した各proposal自身のWHO-WHATだけを根拠にし、4色・reason・同proposalを引用したevidenceが揃わなければ`insufficient`にする。各 `proposals[]` を `POST /api/regulations/apply` に通してから、1件ずつ `POST /api/strategies`(`status` を省略すれば自動で `"proposed"` になり、既存の `/api/strategies/generate` と同じ「提案中」ステータスで保存される)で保存する。
 - **API実行モード**: 従来どおり `POST /api/strategies/generate`(サーバーがOpenAIを呼ぶ・従量課金)。ユーザーが「OpenAIで」「UIと同じで」と言ったとき、またはサブスク実行が難しいときに使う。
 
 ## 手順

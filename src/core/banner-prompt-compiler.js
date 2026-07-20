@@ -1,3 +1,5 @@
+import { buildColorNeutralTemplateZones } from "./banner-template-color.js";
+
 const IMAGE_TYPES = new Set(["image"]);
 const SHAPE_TYPES = new Set(["shape"]);
 
@@ -14,7 +16,10 @@ export function compileClosedTemplatePromptSeed({
     .map((slot) => [String(slot?.slotId || ""), String(slot?.text || "")])
     .filter(([slotId]) => slotId));
   const visualIntent = safeVisualIntentText(creativeHypothesis?.visualIntent, banner);
-  const colorDirective = resolveColorDirective(instructionPolicy.rawInstruction);
+  const neutralTemplateZones = buildColorNeutralTemplateZones(
+    template.templateZones,
+    template.templateColorScheme || template.templatePromptJson?.colorScheme
+  );
   const variationDirection = uniqueStrings([
     copyBrief.appealAxis,
     copyBrief.variationDirection,
@@ -26,10 +31,11 @@ export function compileClosedTemplatePromptSeed({
     instructionPolicy.rawInstruction
   ]).join(" / ");
 
-  const zones = (Array.isArray(template.templateZones) ? template.templateZones : []).map((zone, zoneIndex) => ({
+  const zones = neutralTemplateZones.map((zone, zoneIndex) => ({
     position: String(zone?.position || zone?.area || ""),
     purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
     background: "",
+    backgroundColorRole: String(zone?.backgroundColorRole || ""),
     elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => {
       const type = normalizeElementType(element?.type);
       const slotId = String(element?.slotId || `z${zoneIndex + 1}e${elementIndex + 1}`);
@@ -47,12 +53,12 @@ export function compileClosedTemplatePromptSeed({
           slotTextById,
           product,
           visualIntent,
-          variationDirection,
-          accentColor: colorDirective.accent
+          variationDirection
         }),
         position: plainObject(element?.position),
         size: String(element?.size || ""),
-        effect: type === "shape" ? rewriteShapeColor(element?.effect, colorDirective.accent) : String(element?.effect || ""),
+        colorRole: String(element?.colorRole || ""),
+        effect: String(element?.effect || ""),
         targetChars: element?.charCount ?? element?.characterCount ?? "",
         sourceReason: sourceReasonFor(type, visualIntent, variationDirection),
         templateReuseLevel: "closed-structure"
@@ -68,10 +74,7 @@ export function compileClosedTemplatePromptSeed({
       benefit: strategyText(strategy, "benefit", "productConcept", "markdown"),
       offer: strategyText(strategy, "offer") || String(copyBrief.offerBadge || ""),
       globalDesign: { designRationale },
-      colorScheme: {
-        ...(colorDirective.background ? { background: colorDirective.background } : {}),
-        ...(colorDirective.accent ? { accent: colorDirective.accent } : {})
-      },
+      colorScheme: {},
       additionalInstruction: String(instructionPolicy.rawInstruction || ""),
       zones,
       referenceImage: { instruction: "", url: "" },
@@ -83,7 +86,7 @@ export function compileClosedTemplatePromptSeed({
   };
 }
 
-function elementContent({ element, type, role, slotId, slotTextById, product, visualIntent, variationDirection, accentColor }) {
+function elementContent({ element, type, role, slotId, slotTextById, product, visualIntent, variationDirection }) {
   if (type === "text") {
     if (slotTextById.has(slotId)) return slotTextById.get(slotId);
     if (isBrandText(role, element?.messageRole)) return String(product.brandName || product.name || "");
@@ -99,7 +102,7 @@ function elementContent({ element, type, role, slotId, slotTextById, product, vi
     }
     return `画像枠（${role || "visual"}）。選択WHO-WHATの対象場面を文字なしで表現する。ユーザー選択素材を複製・模倣しない。`;
   }
-  if (SHAPE_TYPES.has(type)) return rewriteShapeColor(element?.description || element?.content, accentColor);
+  if (SHAPE_TYPES.has(type)) return String(element?.description || element?.content || "");
   return "";
 }
 
@@ -137,31 +140,6 @@ function safeVisualIntentText(value, banner) {
     .filter((item) => typeof item === "string")
     .filter((item) => !/(?:ロゴ|商品画像|商品素材|選択素材|パッケージ|ボトル).*(?:複数|並べ|量産|反復|同じ)|(?:複数|並べ|量産|反復|同じ).*(?:ロゴ|商品画像|商品素材|選択素材|パッケージ|ボトル)/i.test(item)))
     .join(" / ");
-}
-
-function resolveColorDirective(rawInstruction) {
-  const text = String(rawInstruction || "");
-  const accent = [
-    [/青|ブルー|シアン/, "青"],
-    [/赤|レッド/, "赤"],
-    [/緑|グリーン/, "緑"],
-    [/オレンジ|橙/, "オレンジ"],
-    [/紫|パープル/, "紫"],
-    [/ピンク|桃色/, "ピンク"],
-    [/黄|イエロー|ゴールド|金色/, "黄"]
-  ].find(([pattern]) => pattern.test(text))?.[1] || "";
-  const background = /白地|白背景|ホワイト(?:の)?背景/.test(text) ? "白" : "";
-  return { accent, background };
-}
-
-function rewriteShapeColor(value, accentColor) {
-  const source = String(value || "").trim();
-  if (!source) return "";
-  const withoutSourceColor = source
-    .replace(/(?:ゴールド|金色|黄色|イエロー|オレンジ|橙色|赤色?|レッド|青色?|ブルー|シアン|水色|緑色?|グリーン|紫色?|パープル|ピンク|桃色|黒色?|ブラック|白色?|ホワイト|グレー|灰色)の?/gi, "")
-    .replace(/の{2,}/g, "の")
-    .trim();
-  return accentColor ? `${withoutSourceColor}。色は${accentColor}` : withoutSourceColor;
 }
 
 function isBrandText(role, messageRole) {

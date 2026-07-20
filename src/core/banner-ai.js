@@ -6,6 +6,14 @@ import { buildInstructionPolicy, ruleIsExplicitlyOverridden } from "./banner-ins
 import { buildBannerGenerationContract } from "./banner-generation-contract.js";
 import { hashCopyBrief } from "./banner-copy-hash.js";
 import { compileClosedTemplatePromptSeed } from "./banner-prompt-compiler.js";
+import { COLOR_FIELDS, normalizePalette, resolveBannerColorDecision } from "./banner-color-decision.js";
+import {
+  auditPromptColorContract,
+  bindResolvedPaletteToZones,
+  buildColorNeutralTemplateDesign,
+  buildColorNeutralTemplateZones,
+  stripTemplateColorTokens
+} from "./banner-template-color.js";
 import {
   buildClosedStructureInstruction,
   buildSelectedAssetOverridePolicy,
@@ -31,6 +39,13 @@ export async function generateBannerCreativeProposal({
     [banner?.additionalInstruction, banner?.revisionInstruction].filter(Boolean).join("\n")
   );
   const rules = classifyExpressionRules(expressionRules, product, instructionPolicy);
+  const colorDecision = resolveBannerColorDecision({
+    userInstruction: combinedBannerInstruction(banner, instructionPolicy),
+    expressionRules: rules.specifiedRules,
+    product,
+    strategy,
+    template
+  });
   const generationContext = prepareBannerGenerationContext(product, strategy);
   const copySlotPlan = buildCopySlotPlan(template);
   const generationContract = banner?.bannerGenerationContract || buildBannerGenerationContract({
@@ -63,7 +78,8 @@ export async function generateBannerCreativeProposal({
       copySlotPlan,
       generationContract,
       creativeHypothesis,
-      approvedClaimSnapshot
+      approvedClaimSnapshot,
+      colorDecision
     });
     audit.modelDesignCalls += 1;
     audit.inputChars += BANNER_CREATOR_SYSTEM.length + userPrompt.length;
@@ -93,7 +109,8 @@ export async function generateBannerCreativeProposal({
       instructionPolicy,
       generationContract,
       creativeHypothesis,
-      approvedClaimSnapshot
+      approvedClaimSnapshot,
+      colorDecision
     });
     const repaired = reapplyLockedSlotTexts(normalized, {
       copyBrief: lockedCopyBrief,
@@ -132,7 +149,8 @@ export async function generateBannerCreativeProposal({
       instructionPolicy,
       generationContract,
       creativeHypothesis,
-      approvedClaimSnapshot
+      approvedClaimSnapshot,
+      colorDecision
     });
     const repaired = reapplyLockedSlotTexts(normalized, {
       copyBrief: lockedCopyBrief,
@@ -145,7 +163,7 @@ export async function generateBannerCreativeProposal({
 
   const normalized = closedTemplate ? runDeterministicDesign() : await runDesign();
 
-  const result = {
+  const result = finalizeBannerColorContract({
     ...applyRegulationRules(normalized, rules.ngRules, instructionPolicy),
     overriddenRules: rules.overriddenRules.map((rule) => ({
       ruleId: rule.id || "",
@@ -153,7 +171,7 @@ export async function generateBannerCreativeProposal({
       pattern: rule.pattern || "",
       reason: "explicit_additional_instruction"
     }))
-  };
+  }, template);
   result.promptGenerationAudit = finalizePromptGenerationAudit(audit, "completed");
   return result;
   } catch (error) {
@@ -262,12 +280,13 @@ function findBestUnlockedTextElement(elements, claimedElements, slot) {
 
 export function prepareBannerGenerationContext(product = {}, strategy = {}) {
   const sanitizedProduct = summarizeProductIdentity(product);
+  const { colorInference: _colorInference, ...strategyWithoutColorInference } = strategy || {};
 
   const markdown = String(strategy.markdown || "").trim();
   if (!markdown) {
     return {
       product: sanitizedProduct,
-      strategy: { ...strategy, sourceMode: "structured_fallback" }
+      strategy: { ...strategyWithoutColorInference, sourceMode: "structured_fallback" }
     };
   }
 
@@ -285,7 +304,7 @@ export function prepareBannerGenerationContext(product = {}, strategy = {}) {
   };
 }
 
-export function buildBannerDesignPrompt({ banner, product, strategy, template, specifiedRules, instructionPolicy = null, diversityGuidance, copyBrief, copySlotPlan, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null, retryReason }) {
+export function buildBannerDesignPrompt({ banner, product, strategy, template, specifiedRules, instructionPolicy = null, diversityGuidance, copyBrief, copySlotPlan, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null, colorDecision = null, retryReason }) {
   void generationContract;
   void retryReason;
   const stage2Input = buildBannerDesignInput({
@@ -299,7 +318,8 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
     copyBrief,
     copySlotPlan,
     creativeHypothesis,
-    approvedClaimSnapshot
+    approvedClaimSnapshot,
+    colorDecision
   });
   const templateStructureContract = stage2Input.templateStructureContract;
   const selectedAssetPolicy = stage2Input.selectedAssetPolicy;
@@ -321,7 +341,8 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
     "promptJsonは指定JSON構造（basic, globalDesign, colorScheme, zones, referenceImage, negativeRules, reviewChecklist）に合わせる。",
     "zones[].elements[] の text 要素は copyBrief.slotTexts の slotId 対応で配置する。slotTextsがない旧データの場合のみ mainHook, subHook, proof, offerBadge, cta, disclaimer の非空値を使う。新しいコピーを書かない。",
     "promptJson.target, desire, benefit, offerは戦略本文から読み取り、画像生成へ渡す完成値を必ず入れる。",
-    "商品にbrandToneが設定されている場合はglobalDesign.toneに反映する。ブランドカラーは商品情報から指定せず、テンプレ構造と訴求内容に合う配色を設計する。",
+    "商品にbrandToneが設定されている場合はglobalDesign.toneに反映する。配色はcolorDecision.paletteで確定済みのため、変更・補完・再推論しない。",
+    "テンプレ由来の自然言語内の色名、元HEX、色付きeffectを配色根拠にせず、colorRoleへcolorDecision.paletteを適用する。",
     "テンプレDBがある場合は、構造レイヤー（ゾーン構成・要素配置・視線誘導・余白設計）を維持し、デザインレイヤーは参考にする。コンテンツレイヤーの新規作成とは、既存image/shape枠の内側を商品/WHO-WHAT/copyBriefに合わせることを意味する。ユーザー選択素材だけは唯一の例外として、対応枠がない場合も最小限配置できるが、それ以外の新しいelementは追加しない。",
     "テンプレにcontentArchitecture/variableDefinitionsがある場合は、訴求順序と各要素のmessageRole/source/constraintsを維持し、単純な名詞置換ではなく同じ役割を果たす配置と画像へ差し替える。",
     "各zones[].elements[]には type, role, content, position, size, targetChars, sourceReason, templateReuseLevel を入れる。",
@@ -329,22 +350,35 @@ export function buildBannerDesignPrompt({ banner, product, strategy, template, s
   ].filter(Boolean).join("\n");
 }
 
-export function buildBannerDesignInput({ banner = {}, product = {}, strategy = {}, template = null, specifiedRules = [], instructionPolicy = null, diversityGuidance = null, copyBrief = null, copySlotPlan = null, creativeHypothesis = null, approvedClaimSnapshot = null } = {}) {
+export function buildBannerDesignInput({ banner = {}, product = {}, strategy = {}, template = null, specifiedRules = [], instructionPolicy = null, diversityGuidance = null, copyBrief = null, copySlotPlan = null, creativeHypothesis = null, approvedClaimSnapshot = null, colorDecision = null } = {}) {
   const resolvedSlotPlan = copySlotPlan || buildCopySlotPlan(template);
-  const templateStructureContract = buildTemplateStructureContract(template?.templateZones);
   const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
   const resolvedInstructionPolicy = instructionPolicy || buildInstructionPolicy(
     [banner?.additionalInstruction, banner?.revisionInstruction].filter(Boolean).join("\n")
   );
+  const resolvedColorDecision = colorDecision || resolveBannerColorDecision({
+    userInstruction: combinedBannerInstruction(banner, resolvedInstructionPolicy),
+    expressionRules: specifiedRules,
+    product,
+    strategy,
+    template
+  });
+  const generationContext = prepareBannerGenerationContext(product, strategy);
+  const neutralTemplateZones = buildColorNeutralTemplateZones(
+    template?.templateZones,
+    template?.templateColorScheme || template?.templatePromptJson?.colorScheme
+  );
+  const templateStructureContract = buildTemplateStructureContract(neutralTemplateZones);
   return {
     version: 1,
     banner: {
       id: String(banner?.id || ""),
       imageSize: String(banner?.imageSize || "1080x1080")
     },
-    productIdentity: summarizeProductIdentity(product),
-    strategy,
-    copyBrief: normalizeCopyBriefForDesign(copyBrief, strategy, resolvedSlotPlan),
+    productIdentity: generationContext.product,
+    strategy: generationContext.strategy,
+    colorDecision: resolvedColorDecision,
+    copyBrief: normalizeCopyBriefForDesign(copyBrief, generationContext.strategy, resolvedSlotPlan),
     copySlotPlan: summarizeCopySlotPlanForPrompt(resolvedSlotPlan),
     templateId: String(template?.id || ""),
     templateStructureContract,
@@ -395,7 +429,7 @@ export function buildBannerDiversityInstruction(guidance) {
   ].filter(Boolean).join("\n");
 }
 
-export function normalizeBannerProposal(parsed, { banner, product, strategy, template, diversityGuidance = null, copyBrief = null, copySlotPlan = null, specifiedRules = [], instructionPolicy = null, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null } = {}) {
+export function normalizeBannerProposal(parsed, { banner, product, strategy, template, diversityGuidance = null, copyBrief = null, copySlotPlan = null, specifiedRules = [], instructionPolicy = null, generationContract = null, creativeHypothesis = null, approvedClaimSnapshot = null, colorDecision = null } = {}) {
   const plan = copySlotPlan || buildCopySlotPlan(template);
   const lockedCopyBrief = normalizeCopyBriefForDesign(copyBrief, strategy, plan);
   const contractRequired = requiresStage2Contract(lockedCopyBrief, creativeHypothesis, approvedClaimSnapshot);
@@ -412,6 +446,13 @@ export function normalizeBannerProposal(parsed, { banner, product, strategy, tem
   const imageText = buildImageTextFromCopyBrief(lockedCopyBrief, plan);
   const rawPromptJson = parsed?.promptJson || parsed?.prompt || {};
   const promptJson = rawPromptJson && typeof rawPromptJson === "object" && !Array.isArray(rawPromptJson) ? rawPromptJson : { reproductionPrompt: String(rawPromptJson || "") };
+  const resolvedColorDecision = colorDecision || resolveBannerColorDecision({
+    userInstruction: combinedBannerInstruction(banner, instructionPolicy),
+    expressionRules: specifiedRules,
+    product,
+    strategy,
+    template
+  });
   const normalizedPromptJson = normalizePromptJson(promptJson, {
     banner: banner || {},
     product: product || {},
@@ -423,7 +464,8 @@ export function normalizeBannerProposal(parsed, { banner, product, strategy, tem
     copySlotPlan: plan,
     specifiedRules,
     instructionPolicy,
-    contractRefs
+    contractRefs,
+    colorDecision: resolvedColorDecision
   });
   if (contractRefs) assertPromptContractRefs(normalizedPromptJson, contractRefs);
   const resolvedContract = stripTemplateDisplayMetadataFromContract(generationContract || buildBannerGenerationContract({
@@ -439,16 +481,11 @@ export function normalizeBannerProposal(parsed, { banner, product, strategy, tem
   const resolvedHypothesis = contractRequired
     ? creativeHypothesis
     : normalizeLegacyCreativeHypothesis(parsed?.creativeHypothesis, lockedCopyBrief, resolvedContract);
-  return {
+  return finalizeBannerColorContract({
     imageText,
     copyBrief: lockedCopyBrief,
     promptJson: normalizedPromptJson,
-    colorDecision: resolveColorDecision({
-      rawColorScheme: rawPromptJson?.colorScheme,
-      palette: normalizedPromptJson.colorScheme,
-      instructionPolicy,
-      specifiedRules
-    }),
+    colorDecision: resolvedColorDecision,
     promptText: buildPromptText(normalizedPromptJson).trim(),
     reviewNotes: Array.isArray(parsed?.reviewNotes) ? parsed.reviewNotes.join("\n") : String(parsed?.reviewNotes || "").trim(),
     selectionReason: String(parsed?.selectionReason || "").trim(),
@@ -458,7 +495,7 @@ export function normalizeBannerProposal(parsed, { banner, product, strategy, tem
       hypothesisId: String(creativeHypothesis?.hypothesisId || ""),
       contentHash: String(creativeHypothesis?.contentHash || "")
     } : null
-  };
+  }, template);
 }
 
 function normalizeLegacyCreativeHypothesis(value, copyBrief, contract) {
@@ -534,63 +571,51 @@ function contractError(code, restartNode, message) {
   return error;
 }
 
-function normalizePromptJson(promptJson, { banner, product, strategy, template, imageText, diversityGuidance, copyBrief, copySlotPlan, specifiedRules, instructionPolicy, contractRefs = null }) {
+function normalizePromptJson(promptJson, { banner, product, strategy, template, imageText, diversityGuidance, copyBrief, copySlotPlan, specifiedRules, instructionPolicy, contractRefs = null, colorDecision }) {
+  void specifiedRules;
   const hasModelZones = Array.isArray(promptJson.zones) && promptJson.zones.length;
-  const sanitizedTemplateZones = sanitizeTemplateZonesForDesign(template?.templateZones);
+  const templatePalette = template?.templateColorScheme || template?.templatePromptJson?.colorScheme || {};
+  const neutralTemplateZones = buildColorNeutralTemplateZones(template?.templateZones, templatePalette);
+  const neutralGeneratedZones = buildColorNeutralTemplateZones(promptJson.zones, promptJson.colorScheme);
   const selectedAssetPolicy = buildSelectedAssetOverridePolicy(banner);
-  const templateStructure = sanitizedTemplateZones.length
-    ? enforceTemplateStructure({ templateZones: template?.templateZones, generatedZones: promptJson.zones })
+  const templateStructure = neutralTemplateZones.length
+    ? enforceTemplateStructure({ templateZones: neutralTemplateZones, generatedZones: neutralGeneratedZones })
     : null;
   const sourceZones = templateStructure
     ? templateStructure.zones
-    : (hasModelZones ? promptJson.zones : fallbackZones({ product, strategy, copyBrief }));
+    : (hasModelZones
+      ? neutralGeneratedZones
+      : buildColorNeutralTemplateZones(fallbackZones({ product, strategy, copyBrief }), {}));
   const basic = promptJson.basic && typeof promptJson.basic === "object" ? promptJson.basic : {};
   const globalDesign = promptJson.globalDesign && typeof promptJson.globalDesign === "object" ? promptJson.globalDesign : {};
-  const colorScheme = promptJson.colorScheme && typeof promptJson.colorScheme === "object" ? promptJson.colorScheme : {};
-  const resolvedColorScheme = applyColorPriority({
-    palette: {
-    main: String(colorScheme.main || SAFE_BANNER_PALETTE.main),
-    sub: String(colorScheme.sub || SAFE_BANNER_PALETTE.sub),
-    accent: String(colorScheme.accent || SAFE_BANNER_PALETTE.accent),
-    background: String(colorScheme.background || SAFE_BANNER_PALETTE.background),
-    },
-    instructionPolicy,
-    specifiedRules
-  });
-  Object.assign(resolvedColorScheme, {
-    usage: colorScheme.usage || {
-      main: "trust and headline",
-      accent: "CTA and offer emphasis",
-      background: "readability"
-    },
-    designNote: String(colorScheme.designNote || promptJson.colorDirection || "")
-  });
-  const zones = normalizeZones(sourceZones, copyBrief, copySlotPlan, product).map((zone) => ({
-    ...zone,
-    ...(!hasModelZones && !templateStructure ? { background: "" } : {}),
-    elements: (zone.elements || []).map((element) => ({
-      ...element,
-      ...(!element.color ? { color: colorForElement(element, resolvedColorScheme) } : {})
-    }))
-  }));
+  const modelDesign = buildColorNeutralTemplateDesign(globalDesign);
+  const resolvedColorScheme = {
+    ...colorDecision.palette,
+    usage: buildPaletteUsage(colorDecision),
+    designNote: buildColorDecisionNote(colorDecision)
+  };
+  const zones = bindResolvedPaletteToZones(
+    normalizeZones(sourceZones, copyBrief, copySlotPlan, product),
+    colorDecision.palette
+  );
   const structureSheet = templateStructure
     ? buildStructureSheet(null, zones)
     : (promptJson.structureSheet || promptJson.templateStructure || buildStructureSheet(null, zones));
-  const templateDesign = sanitizeTemplateDesign(template?.templateGlobalDesign) || {};
+  const templateDesign = buildColorNeutralTemplateDesign(template?.templateGlobalDesign);
   const requestedSize = String(banner.imageSize || "").trim();
   const resolvedVisualStyle = templateStructure?.contract?.typeCounts?.image === 0 && !selectedAssetPolicy.enabled
     ? {
         type: "text-and-existing-shapes-only",
-        mood: String(globalDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
+        mood: String(modelDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
         note: "既存のtext/shape要素だけを使用する。ロゴ、写真、イラスト、人物、端末、図解、追加装飾を描かない。"
       }
     : (selectedAssetPolicy.enabled && templateStructure?.contract?.typeCounts?.image === 0
       ? {
           type: "selected-assets-with-template-layout",
-          mood: String(globalDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
+          mood: String(modelDesign.visualStyle?.mood || templateDesign.visualStyle?.mood || "clear and restrained"),
           note: "閉じたテンプレの視線順と可読性を維持し、ユーザー選択素材だけを最小限追加する。それ以外の画像・装飾は増やさない。"
         }
-      : (globalDesign.visualStyle || templateDesign.visualStyle || { type: "product and benefit scene", mood: "credible", note: "avoid copying template subject matter" }));
+      : (modelDesign.visualStyle || templateDesign.visualStyle || { type: "product and benefit scene", mood: "credible", note: "avoid copying template subject matter" }));
   return {
     basic: {
       aspectRatio: requestedSize ? deriveAspectRatioLabel(requestedSize) : String(basic.aspectRatio || promptJson.aspectRatio || "1:1"),
@@ -606,15 +631,15 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
     additionalInstruction: String(instructionPolicy?.rawInstruction || promptJson.additionalInstruction || ""),
     structureSheet,
     globalDesign: {
-      style: String(globalDesign.style || templateDesign.style || promptJson.style || "direct response banner"),
-      tone: String(globalDesign.tone || product.brandTone || promptJson.tone || "clear, credible, action-oriented"),
-      targetImpression: String(globalDesign.targetImpression || "target feels this ad is about their own situation"),
-      fontPolicy: globalDesign.fontPolicy || { primary: "large readable Japanese headline", secondary: "support copy", note: "small but legible notes" },
-      spacingPolicy: globalDesign.spacingPolicy || { overall: "preserve clear margins", margin: "10% or more where possible", elementGap: "avoid crowding text" },
-      contrastPolicy: globalDesign.contrastPolicy || { level: "high", note: "CTA and main copy must stand out" },
+      style: String(modelDesign.style || templateDesign.style || stripTemplateColorTokens(promptJson.style) || "direct response banner"),
+      tone: String(modelDesign.tone || product.brandTone || promptJson.tone || "clear, credible, action-oriented"),
+      targetImpression: String(modelDesign.targetImpression || "target feels this ad is about their own situation"),
+      fontPolicy: modelDesign.fontPolicy || templateDesign.fontPolicy || { primary: "large readable Japanese headline", secondary: "support copy", note: "small but legible notes" },
+      spacingPolicy: modelDesign.spacingPolicy || templateDesign.spacingPolicy || { overall: "preserve clear margins", margin: "10% or more where possible", elementGap: "avoid crowding text" },
+      contrastPolicy: modelDesign.contrastPolicy || templateDesign.contrastPolicy || { level: "high", note: "CTA and main copy must stand out" },
       visualStyle: resolvedVisualStyle,
-      gridAlignment: globalDesign.gridAlignment || { horizontal: "structured alignment", vertical: "zone based", note: "maintain template-like hierarchy" },
-      designRationale: String(globalDesign.designRationale || promptJson.visualDirection || diversityGuidance?.axisInstruction || "")
+      gridAlignment: modelDesign.gridAlignment || templateDesign.gridAlignment || { horizontal: "structured alignment", vertical: "zone based", note: "maintain template-like hierarchy" },
+      designRationale: stripTemplateColorTokens(modelDesign.designRationale || promptJson.visualDirection || diversityGuidance?.axisInstruction || "")
     },
     colorScheme: resolvedColorScheme,
     zones,
@@ -730,6 +755,8 @@ function normalizeZones(zones, copyBrief, copySlotPlan = null, product = {}) {
     name: String(zone.name || `Zone ${index + 1}`),
     position: String(zone.position || zone.area || ""),
     purpose: String(zone.purpose || zone.role || ""),
+    backgroundColorRole: String(zone.backgroundColorRole || ""),
+    background: String(zone.background || ""),
     elements: (Array.isArray(zone.elements) ? zone.elements : []).map((element, elementIndex) => {
       const type = String(element.type || "text");
       const normalized = {
@@ -737,6 +764,7 @@ function normalizeZones(zones, copyBrief, copySlotPlan = null, product = {}) {
         slotId: String(element.slotId || `z${index + 1}e${elementIndex + 1}`),
         role: String(element.role || element.name || ""),
         messageRole: String(element.messageRole || ""),
+        colorRole: String(element.colorRole || ""),
         content: String(element.content || element.text || ""),
         position: element.position || {},
         size: String(element.size || ""),
@@ -839,97 +867,60 @@ function normalizeComparable(value) {
   return String(value || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
 }
 
-function applyColorPriority({ palette, instructionPolicy, specifiedRules }) {
-  const next = { ...SAFE_BANNER_PALETTE, ...(palette || {}) };
-  const regulationText = (Array.isArray(specifiedRules) ? specifiedRules : [])
-    .filter((rule) => /color|colour|カラー|配色|色/i.test(`${rule?.ruleType || ""} ${rule?.description || ""} ${rule?.pattern || ""}`))
-    .map((rule) => `${rule?.ruleType || ""} ${rule?.description || ""} ${rule?.pattern || ""}`)
+function combinedBannerInstruction(banner = {}, instructionPolicy = null) {
+  const direct = [banner?.additionalInstruction, banner?.revisionInstruction]
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
     .join("\n");
-  Object.assign(next, extractPaletteOverride(regulationText));
-  if ((instructionPolicy?.explicitOverrides || []).some((item) => item?.field === "color")) {
-    Object.assign(next, extractPaletteOverride(instructionPolicy.rawInstruction));
+  return direct || String(instructionPolicy?.rawInstruction || "");
+}
+
+function buildPaletteUsage(colorDecision) {
+  return {
+    main: "見出し・本文・主要文字",
+    sub: "補助情報・区切り・弱い強調",
+    accent: "CTA・オファー・バッジ・アイコン",
+    background: "各zoneの背景"
+  };
+}
+
+function buildColorDecisionNote(colorDecision) {
+  return COLOR_FIELDS
+    .map((field) => `${field}=${colorDecision?.sourceByField?.[field] || "safe_default"}`)
+    .join(", ");
+}
+
+function finalizeBannerColorContract(proposal, template = null) {
+  const promptPalette = normalizePalette(proposal?.promptJson?.colorScheme);
+  const decisionPalette = normalizePalette(proposal?.colorDecision?.palette);
+  const mismatch = COLOR_FIELDS.some((field) => promptPalette[field] !== decisionPalette[field]);
+  if (mismatch) {
+    throw contractError(
+      "PROMPT_COLOR_DECISION_MISMATCH",
+      "prompt",
+      "画像生成promptのcolorSchemeとcolorDecision.paletteが一致しません。"
+    );
   }
-  return next;
-}
-
-function extractPaletteOverride(value) {
-  const text = String(value || "");
-  if (!text) return {};
-  const color = (text.match(/#[0-9a-f]{6}\b/i) || [])[0] || namedColorHex(text);
-  if (!color) return {};
-  if (/背景|background/i.test(text)) return { background: color };
-  if (/サブ|補助|secondary|sub/i.test(text)) return { sub: color };
-  if (/メイン|基調|primary|main/i.test(text)) return { main: color };
-  if (/アクセント|cta|ボタン|accent/i.test(text)) return { accent: color };
-  return { main: color };
-}
-
-function namedColorHex(value) {
-  const colors = [
-    [/赤|red/i, "#DC2626"],
-    [/青|blue/i, "#2563EB"],
-    [/緑|green/i, "#16A34A"],
-    [/黄|yellow/i, "#EAB308"],
-    [/オレンジ|orange/i, "#F97316"],
-    [/ピンク|pink/i, "#EC4899"],
-    [/紫|purple/i, "#7C3AED"],
-    [/黒|black/i, "#111827"],
-    [/白|white/i, "#FFFFFF"]
-  ];
-  return colors.find(([pattern]) => pattern.test(value))?.[1] || "";
-}
-
-function resolveColorDecision({ rawColorScheme, palette, instructionPolicy, specifiedRules }) {
-  const overrides = Array.isArray(instructionPolicy?.explicitOverrides) ? instructionPolicy.explicitOverrides : [];
-  const hasUserColor = overrides.some((item) => item?.field === "color");
-  const colorRules = (Array.isArray(specifiedRules) ? specifiedRules : []).filter((rule) => /color|colour|カラー|配色|色/i.test(`${rule?.ruleType || ""} ${rule?.pattern || ""} ${rule?.description || ""}`));
-  const hasModelPalette = rawColorScheme && typeof rawColorScheme === "object"
-    && [rawColorScheme.main, rawColorScheme.sub, rawColorScheme.accent, rawColorScheme.background].some((item) => String(item || "").trim());
-  const source = hasUserColor
-    ? "user_instruction"
-    : (colorRules.length ? "regulation" : (hasModelPalette ? "who_what_inference" : "safe_default"));
+  const contractReview = auditPromptColorContract({
+    promptJson: proposal.promptJson,
+    templateColorScheme: template?.templateColorScheme || template?.templatePromptJson?.colorScheme,
+    colorDecision: proposal.colorDecision
+  });
+  if (contractReview.status !== "passed") {
+    const error = contractError(
+      "PROMPT_COLOR_CONTRACT_VIOLATION",
+      "prompt",
+      "画像生成promptに解決済みpalette外のテンプレ色が残っています。"
+    );
+    error.contractReview = contractReview;
+    throw error;
+  }
   return {
-    source,
-    palette,
-    reason: source === "user_instruction"
-      ? "明示的な追加指示を最優先した配色"
-      : (source === "regulation"
-        ? "表現レギュレーションまたは正式ブランド指定を反映した配色"
-        : (source === "who_what_inference" ? "選択WHO-WHATとの相性から推論した配色" : "指定不足時の安全な標準配色")),
-    ignoredTemplatePalette: true
-  };
-}
-
-function colorForElement(element, palette) {
-  if (String(element?.type || "").toLowerCase() !== "text") return "";
-  const role = `${element?.role || ""} ${element?.messageRole || ""}`.toLowerCase();
-  if (/cta|offer|badge|action|オファー|特典|ボタン/.test(role)) return palette.accent;
-  return palette.main;
-}
-
-function summarizeTemplateForPrompt(template) {
-  if (!template || typeof template !== "object") return null;
-  const layoutBlueprint = sanitizeTemplateLayout(template.layoutBlueprint || template.templatePromptJson?.layoutBlueprint);
-  const hasClosedTemplateZones = Array.isArray(template.templateZones) && template.templateZones.length > 0;
-  return {
-    id: template.id || "",
-    creativeType: template.creativeType || "",
-    layoutBlueprint: layoutBlueprint && hasClosedTemplateZones ? { ...layoutBlueprint, zones: [] } : layoutBlueprint,
-    templateGlobalDesign: sanitizeTemplateDesign(template.templateGlobalDesign),
-    templateZones: sanitizeTemplateZonesForDesign(template.templateZones)
-  };
-}
-
-function summarizeBannerForPrompt(banner = {}) {
-  return {
-    id: banner.id || "",
-    imageSize: banner.imageSize || "1080x1080",
-    additionalInstruction: banner.additionalInstruction || "",
-    revisionInstruction: banner.revisionInstruction || "",
-    referenceImageUrl: banner.referenceImageUrl || "",
-    productImagePaths: Array.isArray(banner.productImagePaths) ? banner.productImagePaths : [],
-    logoImagePaths: Array.isArray(banner.logoImagePaths) ? banner.logoImagePaths : [],
-    otherImagePaths: Array.isArray(banner.otherImagePaths) ? banner.otherImagePaths : []
+    ...proposal,
+    colorDecision: {
+      ...proposal.colorDecision,
+      contractReview
+    }
   };
 }
 
@@ -940,49 +931,6 @@ function summarizeProductIdentity(product = {}) {
     brandName: product.brandName || "",
     companyName: product.companyName || "",
     brandTone: product.brandTone || ""
-  };
-}
-
-function sanitizeTemplateDesign(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return {
-    style: value.style || "",
-    fontPolicy: value.fontPolicy || null,
-    spacingPolicy: value.spacingPolicy || null,
-    contrastPolicy: value.contrastPolicy || null,
-    visualStyle: value.visualStyle || null,
-    gridAlignment: value.gridAlignment || null
-  };
-}
-
-function sanitizeTemplateZonesForDesign(zones) {
-  return (Array.isArray(zones) ? zones : []).map((zone, zoneIndex) => ({
-    position: zone?.position || "",
-    purpose: zone?.purpose || "",
-    elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => ({
-      type: element?.type || "",
-      slotId: element?.slotId || `z${zoneIndex + 1}e${elementIndex + 1}`,
-      role: element?.role || "",
-      messageRole: element?.messageRole || "",
-      ...(String(element?.type || "").toLowerCase() === "shape"
-        ? { structuralContent: element?.description || element?.content || "" }
-        : {}),
-      position: element?.position || {},
-      size: element?.size || "",
-      effect: element?.effect || "",
-      charCount: element?.charCount || element?.characterCount || ""
-    }))
-  }));
-}
-
-function sanitizeTemplateLayout(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  return {
-    visualHierarchy: normalizeList(value.visualHierarchy),
-    eyeFlow: String(value.eyeFlow || ""),
-    spacingPolicy: value.spacingPolicy && typeof value.spacingPolicy === "object" ? value.spacingPolicy : null,
-    grid: value.grid && typeof value.grid === "object" ? value.grid : null,
-    zones: sanitizeTemplateZonesForDesign(value.zones)
   };
 }
 
@@ -1200,4 +1148,3 @@ function escapeRegExp(value) {
 }
 
 const BANNER_CREATOR_SYSTEM = loadPrompt("banner");
-const SAFE_BANNER_PALETTE = Object.freeze({ main: "#1F2937", sub: "#FFFFFF", accent: "#F97316", background: "#F8FAFC" });

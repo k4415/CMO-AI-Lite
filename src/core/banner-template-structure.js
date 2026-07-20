@@ -21,12 +21,14 @@ export function buildTemplateStructureContract(templateZones) {
     zones: zones.map((zone, zoneIndex) => ({
       zoneIndex,
       position: zone.position,
+      backgroundColorRole: zone.backgroundColorRole,
       elementCount: zone.elements.length,
       elements: zone.elements.map((element) => ({
         slotId: element.slotId,
         type: element.type,
         role: element.role,
         messageRole: element.messageRole,
+        colorRole: element.colorRole,
         position: element.position,
         size: element.size,
         effect: element.effect,
@@ -65,6 +67,7 @@ export function enforceTemplateStructure({ templateZones, generatedZones }) {
     position: sourceZone.position,
     purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
     background: String(modelZones[zoneIndex]?.background || ""),
+    backgroundColorRole: sourceZone.backgroundColorRole,
     elements: sourceZone.elements.map((sourceElement, elementIndex) => {
       const match = generatedBySlotId.get(sourceElement.slotId);
       if (!match) {
@@ -171,11 +174,13 @@ function normalizeTemplateZones(templateZones) {
   return (Array.isArray(templateZones) ? templateZones : []).map((zone, zoneIndex) => ({
     position: String(zone?.position || zone?.area || ""),
     purpose: String(zone?.purpose || zone?.role || ""),
+    backgroundColorRole: String(zone?.backgroundColorRole || ""),
     elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => ({
       type: normalizeElementType(element?.type),
       slotId: deterministicSlotId(element, zoneIndex, elementIndex),
       role: String(element?.role || element?.name || ""),
       messageRole: String(element?.messageRole || ""),
+      colorRole: String(element?.colorRole || ""),
       content: String(element?.type === "shape" ? (element?.description || element?.content || "") : ""),
       position: clonePlainObject(element?.position),
       size: String(element?.size || ""),
@@ -194,6 +199,7 @@ function projectElement(source, generated = {}) {
     slotId: source.slotId,
     role: source.role,
     messageRole: source.messageRole,
+    colorRole: source.colorRole,
     content: type === "shape" ? projectedShape.content : generatedContent,
     position: clonePlainObject(source.position),
     size: source.size,

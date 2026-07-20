@@ -50,6 +50,8 @@ WHO-WHAT仮説生成（提案中で自動保存）
 
 入力: 商品マスターDB、商品事実DB、表現レギュレーションDB、既存WHO-WHAT DB
 
+既存のWHO-WHAT生成1リクエスト内で`colorInference`も作成・保存する。配色根拠がWHO-WHAT本文へ接続できない場合は`insufficient`とし、バナー生成時に追加のAI推論は行わない。
+
 ## Phase 3: バナー制作
 
 ```text
@@ -61,6 +63,8 @@ WHO-WHAT仮説生成（提案中で自動保存）
 ```
 
 事実DBは入力に含めない。選択WHO-WHATに反映済みの内容だけを使う。
+
+配色はバナー生成時の純粋関数で、`追加指示・修正指示 > 表現レギュレーション／正式ブランド指定 > 保存済みWHO-WHAT colorInference > テンプレカラー > safe default`の順にフィールド単位で確定する。閉じたテンプレの色付き文章・effectは中立化してから確定paletteへ再バインドし、選択素材の原本色は変更しない。この処理でStage 2のAI呼び出しは増やさない。
 
 終端ステータス: `completed` / `completed_with_warnings` / `failed`
 

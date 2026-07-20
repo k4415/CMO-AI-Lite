@@ -1,5 +1,6 @@
 ﻿import { openAiJson } from "./openai-text.js";
 import { loadPrompt } from "./prompt-files.js";
+import { normalizeColorInference } from "./banner-color-decision.js";
 
 const DEFAULT_MODEL = process.env.CMOAI_TEXT_MODEL || process.env.OPENAI_TEXT_MODEL || "gpt-5.5";
 
@@ -8,7 +9,8 @@ export async function generateWhoWhatProposals(context, options = {}) {
   const products = workspace.products || [];
   if (!options.productId && products.length > 1) throw new Error("複数の商品があります。商品を選択してからWHO-WHAT生成を実行してください。");
   const prompt = buildWhoWhatPrompt(context, options);
-  const parsed = await openAiJson({ system: WHO_WHAT_SYSTEM_PROMPT, user: prompt, model: options.model || DEFAULT_MODEL });
+  const jsonGenerator = options.jsonGenerator || openAiJson;
+  const parsed = await jsonGenerator({ system: WHO_WHAT_SYSTEM_PROMPT, user: prompt, model: options.model || DEFAULT_MODEL });
   const proposals = normalizeProposals(parsed.proposals || parsed.hypotheses || [], context, parsed, options.productId || "");
   if (!proposals.length) throw new Error("WHO-WHAT生成結果を解釈できませんでした。もう一度実行してください。");
 
@@ -39,11 +41,13 @@ function buildWhoWhatPrompt(context, options) {
     "# 出力要件",
     "JSONのみで返してください。Markdownのコードフェンスは禁止です。",
     "proposals配列に2〜3案を入れてください。各案は以下のキーを必ず持ちます。",
-    "segmentName, conceptName, targetAttributes, desire, decisionCriteria, alternatives, productConcept, usp, benefit, proof, offer, markdown",
+    "segmentName, conceptName, targetAttributes, desire, decisionCriteria, alternatives, productConcept, usp, benefit, proof, offer, markdown, colorInference",
     "conceptNameは20文字以内を目安にしてください。",
     "markdownはユーザーにそのまま見せる提案文で、指定フォーマットに従ってください。",
     "既存WHO-WHAT DBに登録済みの案と重複する切り口は避け、新しい角度の提案を優先する。",
     "欲求・判断基準は口コミ・顧客の声・LP訴求の事実から仮説化し、直接確認できない場合は「（LP・事実からの仮説）」と明示する。",
+    "colorInferenceは完成した各proposal自身のWHO-WHAT項目だけから推論する。商品事実、表現レギュレーション、ブランド色、テンプレートを配色根拠に混ぜない。",
+    "colorInference.status=inferredはmain/sub/accent/backgroundの4色、reason、同じproposal項目を引用したevidenceが揃う場合だけ使う。根拠不足ならstatus=insufficient、palette={}、evidence=[]とする。",
     "",
     "# 商品マスターDB",
     JSON.stringify(selectedProduct, null, 2),
@@ -66,7 +70,7 @@ function normalizeProposals(items, context, parsed, productId = "") {
   const product = products.find((item) => item.id === productId) || products[0] || context.project?.product || {};
   return items.map((item, index) => {
     const markdown = String(item.markdown || item.output || "").trim();
-    return {
+    const proposal = {
       productId: String(item.productId || product.id || "").trim(),
       segmentName: String(item.segmentName || item.segment || `仮説${index + 1}`).trim(),
       conceptName: String(item.conceptName || item.strategyConcept || item.segmentName || `WHO-WHAT仮説${index + 1}`).trim().slice(0, 30),
@@ -82,7 +86,13 @@ function normalizeProposals(items, context, parsed, productId = "") {
       status: "proposed",
       markdown: markdown || buildFallbackMarkdown(item, parsed, index)
     };
+    proposal.colorInference = normalizeWhoWhatColorInference(item.colorInference, proposal);
+    return proposal;
   }).filter((item) => item.targetAttributes || item.benefit || item.markdown);
+}
+
+export function normalizeWhoWhatColorInference(value, proposal) {
+  return normalizeColorInference(value, proposal);
 }
 
 function buildFallbackMarkdown(item, parsed, index) {
