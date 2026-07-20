@@ -2052,6 +2052,53 @@ body.resizingDetailPane { cursor: col-resize; user-select: none; }
   .aiJobMonitorList { max-height: calc(70vh - 115px); }
 }
 
+.detailAiJobMonitorDock { display: flex; align-items: center; }
+.aiJobMonitorButton.isDocked {
+  position: relative;
+  z-index: auto;
+  right: auto;
+  bottom: auto;
+  width: 36px;
+  min-height: 36px;
+  padding: 4px;
+  gap: 0;
+  border-radius: var(--r-sm);
+  box-shadow: none;
+}
+.aiJobMonitorButton.isDocked .aiJobMonitorButtonLabel { display: none; }
+.detailPaneHeader .aiJobMonitorButtonIcon {
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  color: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: none;
+}
+.aiJobMonitorButton.isDocked .aiJobMonitorBadge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 17px;
+  height: 17px;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid var(--surface);
+  color: var(--accent-contrast);
+  font-size: 9px;
+  line-height: 15px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.aiJobMonitorButton.isDocked .aiJobMonitorAlert {
+  top: auto;
+  right: -3px;
+  bottom: -3px;
+  margin: 0;
+}
+.detailPaneHeader .aiJobMonitorButton [hidden] { display: none; }
+
 @media (prefers-reduced-motion: reduce) {
   .aiJobMonitorItem.is-info .aiJobMonitorStatusIcon, .aiJobMonitorButton.isActive .aiJobMonitorButtonIcon::after { animation: none; }
 }

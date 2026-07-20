@@ -20,6 +20,7 @@ import {
   fetchAiJobSnapshot as requestAiJobSnapshot,
   formatAiJobElapsed,
   isAiJobSnapshotCurrent,
+  placeAiJobMonitorButton,
   pollDelayForAiJobs
 } from "/ai-job-monitor.js";
 
@@ -267,6 +268,7 @@ document.addEventListener("visibilitychange", requestAiJobPollSoon);
 initDetailResize();
 initTableKeyboard();
 document.querySelector(".appShell")?.style.setProperty("--detail-width", `${detailWidth}px`);
+syncAiJobMonitorPlacement(Boolean(selected));
 projectSelect?.addEventListener("change", () => selectProjectPath(projectSelect.value));
 
 for (const button of $$(".tabButton")) button.addEventListener("click", () => switchView(button.dataset.view));
@@ -4966,6 +4968,7 @@ function renderInspector() {
     ? [...body.querySelectorAll("details")].map((item, index) => item.open ? index : -1).filter((index) => index >= 0)
     : [];
   document.querySelector(".appShell")?.classList.toggle("detailOpen", Boolean(selected));
+  syncAiJobMonitorPlacement(Boolean(selected));
   if (!pane || !title || !kicker || !body || !preview) return;
   if (!selected) {
     pane.setAttribute("aria-hidden", "true");
@@ -4998,6 +5001,15 @@ function renderInspector() {
   }
   body.scrollTop = previousScrollTop;
   renderDetailQuickActions(type, payload);
+}
+
+function syncAiJobMonitorPlacement(detailOpen) {
+  return placeAiJobMonitorButton({
+    button: $("#aiJobMonitorButton"),
+    home: $("#aiJobMonitorButtonHome"),
+    dock: $("#detailAiJobMonitorDock"),
+    detailOpen
+  });
 }
 
 // Status pills shown right under the kicker/title in the detail pane header
