@@ -12,6 +12,22 @@
   </head>
   <body>
     <div id="toastStack" class="toastStack" aria-live="polite"></div>
+    <button id="aiJobMonitorButton" class="aiJobMonitorButton" type="button" aria-controls="aiJobMonitorPanel" aria-expanded="false">
+      <span class="aiJobMonitorButtonIcon" aria-hidden="true">AI</span>
+      <span>AIジョブ</span>
+      <span id="aiJobMonitorBadge" class="aiJobMonitorBadge" hidden>0</span>
+      <span id="aiJobMonitorAlert" class="aiJobMonitorAlert" hidden aria-label="確認が必要なジョブがあります"></span>
+    </button>
+    <section id="aiJobMonitorPanel" class="aiJobMonitorPanel" aria-labelledby="aiJobMonitorTitle" hidden>
+      <header class="aiJobMonitorHeader">
+        <div><span>進捗モニター</span><h2 id="aiJobMonitorTitle">AIジョブ</h2></div>
+        <button id="closeAiJobMonitor" type="button" aria-label="AIジョブを閉じる">×</button>
+      </header>
+      <div class="aiJobMonitorContext"><span id="aiJobMonitorProject">案件未選択</span><button id="refreshAiJobMonitor" type="button">更新</button></div>
+      <p id="aiJobMonitorWarning" class="aiJobMonitorWarning" role="status" hidden></p>
+      <div id="aiJobMonitorList" class="aiJobMonitorList" aria-live="polite"></div>
+      <p id="aiJobMonitorEmpty" class="aiJobMonitorEmpty">案件を選択するとAI処理の進捗を確認できます。</p>
+    </section>
     <main class="appShell">
       <header class="appTopbar">
         <div class="appTopbarLeft">

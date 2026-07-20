@@ -39,6 +39,23 @@ Claude Code / Codex
 - **Ad Template Store**: 共通広告テンプレDB (`data/ad-templates.json`)
 - **UI**: 工程別のDB操作画面
 
+## AIジョブ読み取り面
+
+右下のAIジョブモニターは、生成処理へ介入しないread modelとして実装する。
+
+```text
+案件内JSON / 共通テンプレJSON ─→ ai-job-source-cache ─┐
+                                                     ├→ GET /api/ai-jobs → 右下モニター
+同期AI runtime registry ──────────────────────────────┘
+```
+
+- LP解析・テンプレ解析・バナー生成は、既存JSONのstatus、工程、attempt、leaseを正本として復元表示する。
+- 事実抽出・WHO-WHAT・表現レギュレーション抽出は、永続的な実行中レコードを持たないため、同一サーバープロセス内の補助runtime registryで表示する。保存完了後だけ`completed`にする。
+- source cacheは`mtimeMs + ctimeMs + size + ino`が同じ間、大容量JSONを再読込・再parseしない。表示に必要な軽量projectionだけを保持する。
+- APIはETagと304を使い、キャッシュヒット時の負荷をstatと小さい応答に限定する。一時的な読込失敗時は、前回成功値がある場合だけ安全な警告付きで返す。
+- GETはDB更新、lease更新、復旧、AI呼び出し、worker/semaphore取得を行わない。バナー生成の202受付・background dispatch・10並列workerはモニターを待たない。
+- ブラウザは案件ごとのgeneration tokenとAbortControllerで古い応答を破棄し、再帰的`setTimeout`で3秒〜30秒の可変pollingを行う。案件全量の`/api/research`をモニターのためだけに増やさない。
+
 ## バナー生成パイプライン
 
 ```text

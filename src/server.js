@@ -30,6 +30,9 @@ import { FifoWorkerPool } from "./core/job-queue.js";
 import { createPromptWorkerPool, normalizePromptConcurrency, runPromptJobsInPool } from "./core/prompt-worker.js";
 import { acquireFileSemaphore } from "./core/file-semaphore.js";
 import { createTemplateAnalysisWorkerPool, enqueueTemplateAnalysisJob, normalizeTemplateAnalysisConcurrency } from "./core/template-analysis-worker.js";
+import { createAiJobSourceCache } from "./core/ai-job-source-cache.js";
+import { buildAiJobSnapshot, normalizeBannerJobs, normalizeMaterialJobs, normalizeTemplateJobs, safeJobError } from "./core/ai-job-view.js";
+import { createRuntimeAiJobRegistry, runtimeAiJobMetaForAction } from "./core/runtime-ai-job-registry.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
@@ -44,6 +47,10 @@ const templateAnalysisWorkerPool = createTemplateAnalysisWorkerPool(templateAnal
 const templateAnalysisWorkerOwnerId = `${process.pid}-template-${crypto.randomUUID()}`;
 const scheduledTemplateAnalysisAttempts = new Set();
 const scheduledBannerRecoveryAttempts = new Set();
+const aiJobSourceCache = createAiJobSourceCache();
+const runtimeAiJobRegistry = createRuntimeAiJobRegistry();
+const { withRuntimeAiJob } = runtimeAiJobRegistry;
+const aiJobSnapshotCaches = new Map();
 let templateAnalysisRecoveryTimer = null;
 let bannerJobRecoveryTimer = null;
 let bannerJobRecoverySweep = null;
@@ -608,6 +615,22 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { ok: true, workspace: await getResearchWorkspace(projectRoot) });
     }
 
+    if (url.pathname === "/api/ai-jobs" && req.method === "GET") {
+      const projectPath = String(url.searchParams.get("project") || "").trim();
+      if (!isValidAiJobProjectPath(projectPath)) {
+        return sendJson(res, { ok: false, errorCode: "INVALID_PROJECT_PATH", message: "有効な案件を指定してください。" }, 400);
+      }
+      const recentLimitParam = url.searchParams.get("recentLimit");
+      const requestedLimit = recentLimitParam === null || recentLimitParam === "" ? 20 : Number(recentLimitParam);
+      const recentLimit = Math.min(50, Math.max(0, Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 20));
+      const projectRoot = resolveProjectPath(projectPath);
+      const snapshot = await createAiJobApiSnapshot(projectRoot, recentLimit);
+      const etag = `"${snapshot.snapshotVersion}"`;
+      const headers = { "cache-control": "no-cache, private", etag };
+      if (req.headers["if-none-match"] === etag) return sendWithHeaders(res, 304, headers, "");
+      return sendJsonWithHeaders(res, snapshot, 200, headers);
+    }
+
 
     const productMatch = url.pathname.match(/^\/api\/research\/products\/([^/]+)$/);
     if (productMatch && (req.method === "PATCH" || req.method === "DELETE")) {
@@ -778,7 +801,15 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/research/facts/extract-ai" && req.method === "POST") {
       const body = await readJsonBody(req);
       const projectRoot = resolveProjectPath(body.project);
-      return withJobLock(res, `factExtract:${projectRoot}:${body.productId || ""}`, async () => sendJson(res, { ok: true, ...(await extractProductFactsWithAi(projectRoot, { productId: body.productId || "", webSearch: body.webSearch !== false })) }));
+      return withJobLock(res, `factExtract:${projectRoot}:${body.productId || ""}`, async () => {
+        const result = await withRuntimeAiJob({
+          kind: "fact_extraction",
+          projectRoot,
+          targetId: body.productId || "",
+          title: "商品事実抽出"
+        }, async () => extractProductFactsWithAi(projectRoot, { productId: body.productId || "", webSearch: body.webSearch !== false }));
+        return sendJson(res, { ok: true, ...result });
+      });
     }
 
     // AI呼び出しを伴わない無償のNG表現置換API。エージェントのサブスク実行モードが
@@ -800,13 +831,28 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/regulations/import-text" && req.method === "POST") {
       const body = await readJsonBody(req);
       const projectRoot = resolveProjectPath(body.project);
-      return withJobLock(res, `regImport:${projectRoot}`, async () => sendJson(res, { ok: true, ...(await importRegulationsFromText(projectRoot, { productId: body.productId || "", text: body.text || "" })) }));
+      return withJobLock(res, `regImport:${projectRoot}`, async () => {
+        const result = await withRuntimeAiJob({
+          kind: "regulation_extraction",
+          projectRoot,
+          targetId: body.productId || "",
+          title: "表現レギュレーション抽出"
+        }, async () => importRegulationsFromText(projectRoot, { productId: body.productId || "", text: body.text || "" }));
+        return sendJson(res, { ok: true, ...result });
+      });
     }
 
     // 任意フォーマットの本文からAIで表現レギュレーションを抽出して返す(保存はしない。UIで編集後に保存)。
     if (url.pathname === "/api/regulations/extract-text" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return sendJson(res, { ok: true, ...(await extractRegulationRulesFromText({ text: body.text || "" })) });
+      if (!body.project) return sendJson(res, { ok: true, ...(await extractRegulationRulesFromText({ text: body.text || "" })) });
+      const projectRoot = resolveProjectPath(body.project);
+      const result = await withRuntimeAiJob({
+        kind: "regulation_extraction",
+        projectRoot,
+        title: "表現レギュレーション抽出"
+      }, async () => extractRegulationRulesFromText({ text: body.text || "" }));
+      return sendJson(res, { ok: true, ...result });
     }
 
     if (url.pathname === "/api/strategies" && req.method === "POST") {
@@ -821,13 +867,22 @@ const server = http.createServer(async (req, res) => {
       return withJobLock(res, `whoWhat:${projectRoot}:${body.productId || ""}`, async () => {
         const context = await resolveContext(projectRoot);
         if (!context.ok) return sendJson(res, { ok: false, message: "\u30d7\u30ed\u30b8\u30a7\u30af\u30c8\u69cb\u9020\u304c\u4e0d\u5b8c\u5168\u3067\u3059\u3002", validation: context.validation, warnings: context.warnings }, 400);
-        const result = await generateWhoWhatProposals(context, { productId: body.productId || "" });
-        // \u63d0\u6848\u306f\u300c\u63d0\u6848\u4e2d\u300d\u30b9\u30c6\u30fc\u30bf\u30b9\u3067\u81ea\u52d5\u4fdd\u5b58\u3059\u308b(\u4e0d\u8981\u306a\u6848\u306f\u30a2\u30fc\u30ab\u30a4\u30d6\u3067\u623b\u305b\u308b\u305f\u3081\u3001
-        // \u30e6\u30fc\u30b6\u30fc\u78ba\u8a8d\u3092\u631f\u307e\u306a\u3044\u3002\u65e7\u30d5\u30ed\u30fc\u306e\u63d0\u6848\u2192\u78ba\u8a8d\u2192\u4fdd\u5b58\u306f\u5ec3\u6b62)
-        const saved = [];
-        for (const proposal of result.proposals || []) {
-          saved.push(await addStrategy(projectRoot, { ...proposal, status: "proposed" }));
-        }
+        const { result, saved } = await withRuntimeAiJob({
+          kind: "strategy_generation",
+          projectRoot,
+          targetId: body.productId || "",
+          title: "WHO-WHAT生成"
+        }, async ({ update }) => {
+          const generated = await generateWhoWhatProposals(context, { productId: body.productId || "" });
+          update({ stageLabel: "保存処理中" });
+          // 提案は「提案中」ステータスで自動保存する(不要な案はアーカイブで戻せるため、
+          // ユーザー確認を挟まない。旧フローの提案→確認→保存は廃止)
+          const stored = [];
+          for (const proposal of generated.proposals || []) {
+            stored.push(await addStrategy(projectRoot, { ...proposal, status: "proposed" }));
+          }
+          return { result: generated, saved: stored };
+        });
         return sendJson(res, { ok: true, ...result, strategies: saved });
       });
     }
@@ -1112,8 +1167,19 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/run" && req.method === "POST") {
       const body = await readJsonBody(req);
       const projectRoot = resolveProjectPath(body.project);
-      return withJobLock(res, `run:${projectRoot}:${body.actionId}`, async () =>
-        sendJson(res, await runAction({ actionId: body.actionId, projectRoot, dryRun: Boolean(body.dryRun), input: body.input || {} })));
+      return withJobLock(res, `run:${projectRoot}:${body.actionId}`, async () => {
+        const action = () => runAction({ actionId: body.actionId, projectRoot, dryRun: Boolean(body.dryRun), input: body.input || {} });
+        const meta = runtimeAiJobMetaForAction({
+          actionId: body.actionId,
+          projectRoot,
+          dryRun: Boolean(body.dryRun),
+          input: body.input || {}
+        });
+        const result = meta
+          ? await withRuntimeAiJob(meta, action, { isSuccess: (value) => value?.ok !== false })
+          : await action();
+        return sendJson(res, result);
+      });
     }
 
     if (url.pathname === "/project-file") {
@@ -1128,6 +1194,7 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/") return send(res, 200, "text/html; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/index.html"), "utf8"));
     if (url.pathname === "/app.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/app.js"), "utf8"));
+    if (url.pathname === "/ai-job-monitor.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/ai-job-monitor.js"), "utf8"));
     if (url.pathname === "/core/banner-range-edit.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "core/banner-range-edit.js"), "utf8"));
     if (url.pathname === "/styles.css") return send(res, 200, "text/css; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/styles.css"), "utf8"));
     if (url.pathname.startsWith("/assets/")) {
@@ -1204,6 +1271,108 @@ function createSlug(value) {
 
 function sendJson(res, value, status = 200) {
   send(res, status, "application/json; charset=utf-8", JSON.stringify(value, null, 2));
+}
+
+function sendJsonWithHeaders(res, value, status, headers) {
+  sendWithHeaders(res, status, { "content-type": "application/json; charset=utf-8", ...headers }, JSON.stringify(value, null, 2));
+}
+
+function sendWithHeaders(res, status, headers, body) {
+  res.writeHead(status, headers);
+  res.end(body);
+}
+
+async function createAiJobApiSnapshot(projectRoot, recentLimit) {
+  const now = new Date();
+  const sources = await aiJobSourceCache.loadSources({
+    projectRoot,
+    sharedTemplatesPath: path.resolve(process.cwd(), "data", "ad-templates.json")
+  });
+  const recentSince = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
+  const runtimeJobs = runtimeAiJobRegistry.listRuntimeAiJobs({ projectRoot, recentSince });
+  const projectScope = crypto.createHash("sha256").update(projectRoot).digest("hex").slice(0, 12);
+  const sourceVersion = `project:${projectScope}|${sources.signature}|warning:${sources.sourceWarning ? 1 : 0}|runtime:${runtimeAiJobRegistry.getVersion()}|limit:${recentLimit}`;
+  const previous = aiJobSnapshotCaches.get(projectRoot);
+  const boundaryReached = previous?.nextTimeBoundaryAt && now.getTime() >= previous.nextTimeBoundaryAt;
+  let normalizedJobs;
+  let timeBoundaryVersion = previous?.timeBoundaryVersion || 0;
+  let nextTimeBoundaryAt;
+  if (previous?.sourceVersion === sourceVersion && !boundaryReached) {
+    normalizedJobs = previous.normalizedJobs;
+    nextTimeBoundaryAt = previous.nextTimeBoundaryAt;
+  } else {
+    if (previous?.sourceVersion === sourceVersion && boundaryReached) timeBoundaryVersion += 1;
+    normalizedJobs = [
+      ...normalizeMaterialJobs({ jobs: sources.materialJobs, materials: sources.materials, now }),
+      ...normalizeTemplateJobs(sources.templates, { now }),
+      ...normalizeBannerJobs(sources.banners, { now }),
+      ...runtimeJobs.map((job) => ({
+        ...job,
+        errorMessage: ["failed", "stale"].includes(job.status)
+          ? safeJobError(job.errorMessage, runtimeFailureMessage(job.kind))
+          : ""
+      }))
+    ];
+    nextTimeBoundaryAt = findNextAiJobTimeBoundary({ sources, jobs: normalizedJobs, now });
+  }
+  const snapshotVersion = `jobview_${crypto.createHash("sha256")
+    .update(`${sourceVersion}|time:${timeBoundaryVersion}`)
+    .digest("hex")
+    .slice(0, 20)}`;
+  aiJobSnapshotCaches.delete(projectRoot);
+  aiJobSnapshotCaches.set(projectRoot, { sourceVersion, normalizedJobs, timeBoundaryVersion, nextTimeBoundaryAt });
+  while (aiJobSnapshotCaches.size > 5) aiJobSnapshotCaches.delete(aiJobSnapshotCaches.keys().next().value);
+  return buildAiJobSnapshot({
+    jobs: normalizedJobs,
+    now,
+    recentLimit,
+    snapshotVersion,
+    sourceWarning: sources.sourceWarning
+  });
+}
+
+function isValidAiJobProjectPath(projectPath) {
+  const match = /^\.\/projects\/([^/\\]+)$/.exec(projectPath);
+  const projectName = match?.[1] || "";
+  return Boolean(projectName)
+    && projectName !== "."
+    && projectName !== ".."
+    && projectName !== "_template"
+    && !projectName.startsWith(".");
+}
+
+function findNextAiJobTimeBoundary({ sources, jobs, now }) {
+  const nowMs = now.getTime();
+  const candidates = [];
+  for (const job of sources.materialJobs) {
+    if (job.status === "running") addFutureBoundary(candidates, job.progressAt || job.updatedAt || job.startedAt, 10 * 60 * 1000, nowMs);
+  }
+  for (const template of sources.templates) {
+    if (template.templateProcessingStatus === "running") addFutureBoundary(candidates, template.templateAnalysisLease?.expiresAt || template.templateAnalysisLease?.leaseExpiresAt, 0, nowMs);
+  }
+  for (const banner of sources.banners) {
+    const lease = banner.imageGenerationLease || banner.promptGenerationLease;
+    if (lease) addFutureBoundary(candidates, lease.expiresAt || lease.leaseExpiresAt, 0, nowMs);
+  }
+  for (const job of jobs) {
+    if (["completed", "completed_with_warnings", "failed", "stale"].includes(job.status)) {
+      addFutureBoundary(candidates, job.finishedAt || job.updatedAt, 60 * 60 * 1000, nowMs);
+    }
+  }
+  return candidates.length ? Math.min(...candidates) : 0;
+}
+
+function addFutureBoundary(candidates, value, offsetMs, nowMs) {
+  const timestamp = Date.parse(value || "");
+  const boundary = timestamp + offsetMs + 1;
+  if (Number.isFinite(boundary) && boundary > nowMs) candidates.push(boundary);
+}
+
+function runtimeFailureMessage(kind) {
+  if (kind === "fact_extraction") return "商品事実の抽出に失敗しました。";
+  if (kind === "strategy_generation") return "WHO-WHATの生成に失敗しました。";
+  if (kind === "regulation_extraction") return "表現レギュレーションの抽出に失敗しました。";
+  return "AI処理に失敗しました。";
 }
 
 function contentTypeFor(fileName) {

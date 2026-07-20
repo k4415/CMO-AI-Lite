@@ -1968,6 +1968,95 @@ body.resizingDetailPane { cursor: col-resize; user-select: none; }
 }
 
 /* ==========================================================================
+   AI job monitor
+   ========================================================================== */
+.aiJobMonitorButton {
+  position: fixed;
+  z-index: 145;
+  right: 20px;
+  bottom: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 14px 8px 10px;
+  border: 1px solid var(--slate-700);
+  border-radius: var(--r-full);
+  background: var(--slate-900);
+  color: var(--accent-contrast);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 700;
+}
+.aiJobMonitorButton:hover { background: var(--slate-800); }
+.aiJobMonitorButton.isActive .aiJobMonitorButtonIcon::after { content: ""; position: absolute; inset: -3px; border: 2px solid color-mix(in srgb, var(--accent-contrast) 30%, transparent); border-top-color: var(--accent-contrast); border-radius: 50%; animation: aiJobSpin 1.2s linear infinite; }
+.aiJobMonitorButton:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent-500) 35%, transparent); outline-offset: 2px; }
+.aiJobMonitorButtonIcon { position: relative; display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: color-mix(in srgb, var(--accent-contrast) 14%, transparent); font-size: 10px; letter-spacing: .02em; }
+.aiJobMonitorBadge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: var(--r-full); background: var(--accent-500); color: var(--accent-contrast); font-size: 11px; line-height: 20px; text-align: center; }
+.aiJobMonitorAlert { position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border: 2px solid var(--slate-900); border-radius: 50%; background: var(--danger-fg); }
+.aiJobMonitorPanel {
+  position: fixed;
+  z-index: 144;
+  right: 20px;
+  bottom: 76px;
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(70vh, 640px, calc(100vh - 110px));
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+.aiJobMonitorPanel[hidden] { display: none; }
+.aiJobMonitorHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 12px; border-bottom: 1px solid var(--border); }
+.aiJobMonitorHeader span { display: block; margin-bottom: 2px; color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.aiJobMonitorHeader h2 { margin: 0; color: var(--text-primary); font-size: 16px; }
+.aiJobMonitorHeader button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-secondary); font-size: 18px; }
+.aiJobMonitorHeader button:hover { background: var(--slate-100); }
+.aiJobMonitorContext { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: var(--surface-muted); }
+.aiJobMonitorContext span { min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.aiJobMonitorContext button { flex: none; border: 0; background: transparent; color: var(--accent-600); font-size: 11px; font-weight: 700; }
+.aiJobMonitorWarning { margin: 0; padding: 9px 14px; border-bottom: 1px solid var(--warning-border); background: var(--warning-bg); color: var(--warning-fg); font-size: 11px; line-height: 1.45; }
+.aiJobMonitorList { display: grid; gap: 0; max-height: min(520px, calc(100vh - 190px)); overflow-y: auto; }
+.aiJobMonitorSectionLabel { margin: 0; padding: 8px 15px 6px; border-bottom: 1px solid var(--border); background: var(--surface-muted); color: var(--text-tertiary); font-size: 10px; font-weight: 700; letter-spacing: .03em; }
+.aiJobMonitorIdle { margin: 0; padding: 13px 15px; border-bottom: 1px solid var(--border); color: var(--text-tertiary); font-size: 11px; }
+.aiJobMonitorItem { padding: 13px 15px; border-bottom: 1px solid var(--border); }
+.aiJobMonitorItem:last-child { border-bottom: 0; }
+.aiJobMonitorItemTop { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 9px; }
+.aiJobMonitorStatusIcon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--slate-100); color: var(--text-secondary); font-size: 12px; font-weight: 800; }
+.aiJobMonitorItem.is-info .aiJobMonitorStatusIcon { background: var(--info-bg); color: var(--info-fg); }
+.aiJobMonitorItem.is-success .aiJobMonitorStatusIcon { background: var(--success-bg); color: var(--success-fg); }
+.aiJobMonitorItem.is-warning .aiJobMonitorStatusIcon { background: var(--warning-bg); color: var(--warning-fg); }
+.aiJobMonitorItem.is-danger .aiJobMonitorStatusIcon { background: var(--danger-bg); color: var(--danger-fg); }
+.aiJobMonitorItem.is-info .aiJobMonitorStatusIcon { animation: aiJobSpin 1.2s linear infinite; }
+.aiJobMonitorItemTitle { min-width: 0; }
+.aiJobMonitorItemTitle strong { display: block; overflow: hidden; color: var(--text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.aiJobMonitorItemTitle span { display: block; margin-top: 2px; color: var(--text-secondary); font-size: 11px; }
+.aiJobElapsed { color: var(--text-tertiary); font-size: 10px; white-space: nowrap; }
+.aiJobSteps { display: flex; align-items: center; gap: 4px; margin: 9px 0 0 33px; }
+.aiJobStep { flex: 1; min-width: 0; height: 4px; border-radius: var(--r-full); background: var(--slate-100); }
+.aiJobStep.is-completed, .aiJobStep.is-completed_with_warnings { background: var(--success-fg); }
+.aiJobStep.is-running { background: var(--accent-500); }
+.aiJobStep.is-failed, .aiJobStep.is-stale { background: var(--danger-fg); }
+.aiJobMonitorDetail { margin: 7px 0 0 33px; color: var(--text-secondary); font-size: 11px; line-height: 1.45; }
+.aiJobMonitorError { display: -webkit-box; overflow: hidden; color: var(--danger-fg); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.aiJobMonitorError.isExpanded { display: block; overflow: visible; -webkit-line-clamp: unset; }
+.aiJobErrorToggle { margin: 3px 0 0 33px; padding: 0; border: 0; background: transparent; color: var(--accent-600); font-size: 10px; font-weight: 700; }
+.aiJobMonitorEmpty { margin: 0; padding: 28px 20px; color: var(--text-tertiary); font-size: 12px; line-height: 1.6; text-align: center; }
+@keyframes aiJobSpin { to { transform: rotate(360deg); } }
+
+@media (max-width: 820px) {
+  .aiJobMonitorButton { right: 14px; bottom: 14px; }
+  .aiJobMonitorButton[aria-expanded="true"] { display: none; }
+  .aiJobMonitorPanel { right: 0; bottom: 0; width: 100vw; max-height: min(70vh, 640px); border-right: 0; border-bottom: 0; border-left: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; }
+  .aiJobMonitorList { max-height: calc(70vh - 115px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aiJobMonitorItem.is-info .aiJobMonitorStatusIcon, .aiJobMonitorButton.isActive .aiJobMonitorButtonIcon::after { animation: none; }
+}
+
+/* ==========================================================================
    Responsive
    ========================================================================== */
 @media (max-width: 1180px) {
