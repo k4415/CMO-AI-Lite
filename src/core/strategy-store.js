@@ -2,6 +2,7 @@
 import path from "node:path";
 import { pathExists, readJson, writeJson, withFileLock } from "./project-store.js";
 import { normalizeColorInference } from "./banner-color-decision.js";
+import { extractStrategyConceptName } from "./strategy-markdown.js";
 
 const STRATEGIES_PATH = "data/strategies.json";
 
@@ -82,7 +83,7 @@ function normalizeStrategy(input) {
   return {
     id: clean(input.id),
     productId: clean(input.productId),
-    conceptName: clean(input.conceptName),
+    conceptName: extractStrategyConceptName(input.markdown) || clean(input.conceptName),
     targetAttributes: clean(input.targetAttributes),
     desire: clean(input.desire),
     decisionCriteria: clean(input.decisionCriteria),

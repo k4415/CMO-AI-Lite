@@ -23,6 +23,10 @@ import {
   placeAiJobMonitorButton,
   pollDelayForAiJobs
 } from "/ai-job-monitor.js";
+import {
+  DEFAULT_STRATEGY_MARKDOWN,
+  validateStrategyMarkdown
+} from "/core/strategy-markdown.js";
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -2141,8 +2145,8 @@ function strategyRow(strategy) {
   const proseText = strategy.markdown || composeStrategyProse(strategy);
   const tr = row([
     relationCellHtml("strategy", strategy.id, "productId", strategy.productId || "", product?.name || "\u672a\u9078\u629e", "productRelation"),
-    editableCellHtml("strategy", strategy.id, "conceptName", strategy.conceptName || "戦略\u4eee\u8aac"),
-    editableCellHtml("strategy", strategy.id, "markdown", clip(stripMarkdownForPreview(proseText), 220), { kind: "textarea", rawValue: proseText }),
+    '<span class="strategyTableText">' + escapeHtml(strategy.conceptName || "戦略\u4eee\u8aac") + '</span>',
+    '<span class="strategyTableText" title="詳細の編集タブからMarkdownを編集できます">' + escapeHtml(clip(stripMarkdownForPreview(proseText), 220)) + '</span>',
     statusSelectHtml("strategy", strategy.id, "status", strategy.status || "proposed", STRATEGY_STATUS_OPTIONS),
     ""
   ], "strategy", strategy, true);
@@ -2223,6 +2227,15 @@ function limitedMarkdownHtml(value) {
   return html.join("") || '<p class="structuredTextEmpty">戦略本文がありません。</p>';
 }
 
+function strategyMarkdownValidationMessage(markdown, validation = validateStrategyMarkdown(markdown)) {
+  const source = String(markdown || "");
+  if (!source.trim()) return "戦略本文を入力してください。";
+  if (!/^\s*###\s+仮説(?:\s|$)/m.test(source)) return "「### 仮説」の見出しを入力してください。";
+  if (validation.missingHeadings.length) return `不足している見出し: ${validation.missingHeadings.join("、")}`;
+  if (!validation.conceptName) return "「戦略コンセプト:」の次の行に内容を入力してください。";
+  return "戦略本文のフォーマットを確認してください。";
+}
+
 function strategyInspectorHtml(strategy) {
   const product = research.products.find((item) => item.id === strategy.productId);
   const markdown = strategy.markdown || composeStrategyProse(strategy);
@@ -2235,9 +2248,8 @@ function strategyInspectorHtml(strategy) {
     + '<div class="strategyPreviewPanel structuredTextPreview markdownPreview"' + (strategyDetailMode === "preview" ? '' : ' hidden') + '>' + limitedMarkdownHtml(markdown) + '</div>'
     + '<form class="strategyInlineEdit"' + (strategyDetailMode === "edit" ? '' : ' hidden') + '>'
     + '<div class="strategyInlineMeta"><label><span>商品</span><input class="tableInput" value="' + escapeAttr(product?.name || "未選択") + '" disabled /></label><label><span>状態</span><select class="tableSelect" data-strategy-inline-status>' + statusOptions + '</select></label></div>'
-    + '<label><span>戦略コンセプト</span><input class="tableInput" data-strategy-inline-concept value="' + escapeAttr(strategy.conceptName || "") + '" /></label>'
-    + '<label><span>戦略本文</span><textarea class="tableInput strategyInlineMarkdown" data-strategy-inline-markdown spellcheck="false">' + escapeHtml(markdown) + '</textarea></label>'
-    + '<p class="strategySourceNote">この戦略本文がバナー生成に使われます。</p>'
+    + '<label><span>戦略本文（Markdown）</span><textarea class="tableInput strategyInlineMarkdown" data-strategy-inline-markdown spellcheck="false">' + escapeHtml(markdown) + '</textarea></label>'
+    + '<p class="strategySourceNote">戦略コンセプトはMarkdown本文から自動取得します。この本文がバナー生成に使われます。</p>'
     + '<button class="inlineAddButton" type="submit">変更を保存</button>'
     + '</form></div>';
 }
@@ -2263,15 +2275,14 @@ function bindStrategyInspector(root, strategy) {
   }
   root.querySelector(".strategyInlineEdit")?.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const conceptName = root.querySelector("[data-strategy-inline-concept]")?.value.trim() || "";
-    if (!conceptName) return showToast("error", "戦略コンセプトを入力してください。");
+    const markdown = root.querySelector("[data-strategy-inline-markdown]")?.value || "";
+    const validation = validateStrategyMarkdown(markdown);
+    if (!validation.ok) return showToast("error", strategyMarkdownValidationMessage(markdown, validation));
     const submit = event.currentTarget.querySelector('button[type="submit"]');
     const patch = {
-      conceptName,
-      markdown: root.querySelector("[data-strategy-inline-markdown]")?.value.trim() || "",
+      markdown: markdown.trim(),
       status: root.querySelector("[data-strategy-inline-status]")?.value || "proposed"
     };
-    if (!patch.markdown) return showToast("error", "戦略本文を入力してください。");
     await runExclusive("strategyEdit:" + strategy.id, submit, async () => {
       strategyDetailMode = "preview";
       const data = await updateTableRow("strategy", strategy.id, patch);
@@ -3252,12 +3263,34 @@ function strategyOptionsHtml(productId = "", selectedId = "") {
 }
 
 function strategyInputRow() {
-  return inlineAddFormCard("strategiesAddPanel", "戦略\u3092\u8ffd\u52a0", "\u8ab0\u306b\u3001\u4f55\u3092\u3001\u3069\u306e\u30aa\u30d5\u30a1\u30fc\u3067\u63d0\u6848\u3059\u308b\u304b\u3092\u6574\u7406\u3057\u307e\u3059\u3002",
-    `<label class="formField"><span>\u30b3\u30f3\u30bb\u30d7\u30c8\u540d</span><input id="strategyConcept" class="tableInput" placeholder="\u6226\u7565\u30b3\u30f3\u30bb\u30d7\u30c8" /></label>
-     <label class="formField span2"><span>WHO</span><textarea id="strategyWho" class="tableInput compactTextArea" placeholder="\u30bf\u30fc\u30b2\u30c3\u30c8\u5c5e\u6027 / \u6b32\u6c42"></textarea></label>
-     <label class="formField"><span>WHAT</span><input id="strategyBenefit" class="tableInput" placeholder="\u30d9\u30cd\u30d5\u30a3\u30c3\u30c8" /></label>
-     <label class="formField"><span>\u30aa\u30d5\u30a1\u30fc</span><input id="strategyOffer" class="tableInput" placeholder="\u5272\u5f15\u3001\u7279\u5178\u3001CTA" /></label>`,
-    "\u8ffd\u52a0", addStrategy, strategyInputRow, "threeColumn");
+  const card = inlineAddFormCard("strategiesAddPanel", "戦略\u3092\u8ffd\u52a0", "自動生成と同じMarkdown形式で戦略本文を編集します。",
+    `<div class="strategyMarkdownComposer span3">
+       <div class="contentModeTabs" role="tablist" aria-label="手動戦略の表示切替">
+         <button class="contentModeTab active" type="button" role="tab" data-strategy-add-mode="edit" aria-selected="true">編集</button>
+         <button class="contentModeTab" type="button" role="tab" data-strategy-add-mode="preview" aria-selected="false">プレビュー</button>
+       </div>
+       <label class="formField" data-strategy-add-editor><span>戦略本文（Markdown）</span><textarea id="strategyMarkdown" class="tableInput strategyMarkdownEditor" spellcheck="false"></textarea><small class="strategyMarkdownHint">「戦略コンセプト」の本文が一覧名になります。</small></label>
+       <div id="strategyMarkdownAddPreview" class="structuredTextPreview markdownPreview" data-strategy-add-preview hidden></div>
+     </div>`,
+    "\u8ffd\u52a0", addStrategy, strategyInputRow, "strategyMarkdownAddGrid");
+  const editor = card.querySelector("#strategyMarkdown");
+  if (editor) editor.value = DEFAULT_STRATEGY_MARKDOWN;
+  const editorPane = card.querySelector("[data-strategy-add-editor]");
+  const previewPane = card.querySelector("[data-strategy-add-preview]");
+  for (const button of card.querySelectorAll("[data-strategy-add-mode]")) {
+    button.addEventListener("click", () => {
+      const mode = button.dataset.strategyAddMode === "preview" ? "preview" : "edit";
+      if (previewPane && mode === "preview") previewPane.innerHTML = limitedMarkdownHtml(editor?.value || "");
+      if (editorPane) editorPane.hidden = mode !== "edit";
+      if (previewPane) previewPane.hidden = mode !== "preview";
+      for (const tab of card.querySelectorAll("[data-strategy-add-mode]")) {
+        const active = tab.dataset.strategyAddMode === mode;
+        tab.classList.toggle("active", active);
+        tab.setAttribute("aria-selected", String(active));
+      }
+    });
+  }
+  return card;
 }
 
 function openBannerAddModal() {
@@ -3495,15 +3528,18 @@ async function addFact() {
 
 async function addStrategy() {
   const project = selectedProject();
+  const markdown = $("#strategyMarkdown")?.value || "";
+  const validation = validateStrategyMarkdown(markdown);
+  if (!validation.ok) {
+    const message = strategyMarkdownValidationMessage(markdown, validation);
+    showToast("error", message);
+    writeTerminal("error", message);
+    return;
+  }
   const data = await post("/api/strategies", {
     project: project.path,
     productId: $("#strategyProduct")?.value || research.products[0]?.id || "",
-    conceptName: $("#strategyConcept")?.value.trim() || "戦略\u4eee\u8aac",
-    targetAttributes: $("#strategyWho")?.value.trim() || "",
-    desire: $("#strategyWho")?.value.trim() || "",
-    benefit: $("#strategyBenefit")?.value.trim() || "",
-    productConcept: $("#strategyBenefit")?.value.trim() || "",
-    offer: $("#strategyOffer")?.value.trim() || "",
+    markdown: markdown.trim(),
     status: "proposed"
   });
   writeTerminal(data.ok ? "system" : "error", data.ok ? "戦略\u3092\u8ffd\u52a0\u3057\u307e\u3057\u305f\u3002" : JSON.stringify(data, null, 2));

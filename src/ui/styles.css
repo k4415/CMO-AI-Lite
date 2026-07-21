@@ -1175,6 +1175,21 @@ tr[draggable="true"]:active { cursor: grabbing; }
    to match the .addRowButton row used by the production DBs (banner/copy/
    script/article) so both look like the same in-table "+ 追加" row. */
 .tableAddBody td { padding: 0; border-bottom: 1px solid var(--border); overflow: visible; white-space: normal; }
+/* A colspan add-form cell is both :first-child and :last-child. Keep it in the
+   normal table flow so it cannot cover the sticky column headers while the
+   table is scrolled. */
+.dataTable tbody.tableAddBody > tr > td:first-child:last-child {
+  position: static;
+  left: auto;
+  right: auto;
+  z-index: auto;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  background: var(--surface);
+  box-shadow: none;
+  text-align: left;
+}
 .tableAddBody .addRowPanel { margin: 0; border: 0; border-radius: 0; background: transparent; }
 .tableAddBody .addRowPanelButton {
   border: 0;
@@ -1232,6 +1247,13 @@ tr[draggable="true"]:active { cursor: grabbing; }
 .inlineAddGrid .span3 { grid-column: 1 / -1; }
 .compactTextArea { min-height: 52px; resize: vertical; }
 .tallTextArea { min-height: 132px; resize: vertical; }
+.inlineAddGrid.strategyMarkdownAddGrid { grid-template-columns: minmax(0, 1fr); }
+.strategyMarkdownComposer { display: grid; gap: 12px; min-width: 0; }
+.strategyMarkdownComposer [data-strategy-add-editor][hidden],
+.strategyMarkdownComposer [data-strategy-add-preview][hidden] { display: none; }
+.inlineAddForm textarea.tableInput.strategyMarkdownEditor { min-height: 360px; resize: vertical; line-height: 1.7; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.strategyMarkdownHint { color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }
+.strategyTableText { white-space: pre-wrap; word-break: break-word; }
 .inlineAddActions { display: flex; justify-content: flex-end; gap: 8px; }
 .inlineAddActions button { min-width: 92px; height: 32px; }
 .inlineAddForm .tableInput, .inlineAddForm .tableSelect,

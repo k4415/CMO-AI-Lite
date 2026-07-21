@@ -1196,6 +1196,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/app.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/app.js"), "utf8"));
     if (url.pathname === "/ai-job-monitor.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/ai-job-monitor.js"), "utf8"));
     if (url.pathname === "/core/banner-range-edit.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "core/banner-range-edit.js"), "utf8"));
+    if (url.pathname === "/core/strategy-markdown.js") return send(res, 200, "text/javascript; charset=utf-8", await fs.readFile(path.join(__dirname, "core/strategy-markdown.js"), "utf8"));
     if (url.pathname === "/styles.css") return send(res, 200, "text/css; charset=utf-8", await fs.readFile(path.join(__dirname, "ui/styles.css"), "utf8"));
     if (url.pathname.startsWith("/assets/")) {
       const assetName = path.basename(url.pathname);
