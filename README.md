@@ -3,7 +3,7 @@
 CMO AI Liteは、広告運用者が「前提情報 → 事実リサーチ → WHO-WHAT戦略 → バナー画像テンプレ → バナー制作」を実施するためのダイレクトマーケティングに特化したAIシステムです。
 データはすべてローカルPCのフォルダに保存されます。
 
-[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)
+[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://lin.ee/ZnqxpPn)
 
 ## ダウンロード
 
@@ -20,7 +20,7 @@ Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git`
 - **バナー画像テンプレ** — 自社制作NO.001〜100の標準テンプレと新規テンプレ化
 - **バナー制作** — copyBrief + promptJson → `gpt-image-2` による画像生成
 
-[![CMO AI Lite でできること](docs/readme-assets/cmo-ai-lite-cando.png)](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)
+[![CMO AI Lite でできること](docs/readme-assets/cmo-ai-lite-cando.png)](https://lin.ee/ZnqxpPn)
 
 ## 利用条件
 
@@ -65,7 +65,7 @@ npm run dev
 
 ↓　↓　↓　↓　↓
 
-**[LINEに登録してマニュアルを受け取る](https://line-harness.kokami.workers.dev/auth/line?ref=be65354e-968e-46ac-a93a-e70d8729048e&form=3459ae33-6cb9-42a9-9242-9936c3bac104&pool=main)**
+**[LINEに登録してマニュアルを受け取る](https://lin.ee/ZnqxpPn)**
 
 ## Claude Code / Codex から使う
 
