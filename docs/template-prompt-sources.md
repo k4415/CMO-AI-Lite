@@ -1,6 +1,6 @@
 ﻿# テンプレ化プロンプト原本 (CMO AI Lite)
 
-保存日: 2026-06-28（Lite向け更新: 2026-07-17）
+保存日: 2026-06-28（Lite向け更新: 2026-07-31）
 
 CMO AI Lite で使用するのは**バナー画像テンプレ化のみ**です。正確な出力スキーマは `config/prompts/template-banner-image.md` を正とする。
 
@@ -42,5 +42,7 @@ zonesは実レイアウトに合わせて必要数だけ作成する。
 ### 実行
 
 - プロンプト: `config/prompts/template-banner-image.md`
-- API: `POST /api/ad-templates/template-image`
+- API受付: `POST /api/ad-templates/template-image/enqueue`
+- 状態確認: `GET /api/ad-templates/template-image/status?templateIds={templateId}`
+- 同期API `POST /api/ad-templates/template-image` は互換用で、エージェントの通常実行では使わない。
 - スキル: `cmoai-template`

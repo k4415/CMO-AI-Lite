@@ -99,7 +99,8 @@ POST /api/banners/edit-image       {"project":"...","bannerId":"...","editMode":
 PATCH /api/banners/{id}            {"project":"...","patch":{...}}
 
 # テンプレ化
-POST /api/ad-templates/template-image  {"project":"...","templateId":"..."}
+POST /api/ad-templates/template-image/enqueue  {"project":"...","templateId":"..."}
+GET  /api/ad-templates/template-image/status?templateIds={templateId}
 ```
 
 ## バナー生成の入力制約
@@ -116,7 +117,7 @@ Preflight → Stage 1(copyBrief / Anthropic) → Stage 2(promptJson / OpenAI) �
 
 ## テンプレ化
 
-バナー画像テンプレ化のみ。`config/prompts/template-banner-image.md` を読んでから `POST /api/ad-templates/template-image` を実行。変数化は網羅的に行う。詳細は `.claude/skills/cmoai-template/SKILL.md`。
+バナー画像テンプレ化のみ。`config/prompts/template-banner-image.md` を読んでから `POST /api/ad-templates/template-image/enqueue` で非同期受付し、`GET /api/ad-templates/template-image/status?templateIds={templateId}` を3〜5秒間隔で確認する。`queued` / `running` は継続、`completed` かつ `template_ready` で完了、`failed` は `templateAnalysisError` を報告する。対象テンプレート不在、状態API接続失敗、未知の状態値では無限監視せず停止して報告する。同期API `POST /api/ad-templates/template-image` は互換用で、エージェントの通常実行では使わない。変数化は網羅的に行う。詳細は `.claude/skills/cmoai-template/SKILL.md`。
 
 ## Web網羅リサーチ
 
