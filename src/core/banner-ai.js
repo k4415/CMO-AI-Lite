@@ -1164,7 +1164,7 @@ export function classifyExpressionRules(expressionRules, product, instructionPol
     }
     const type = String(rule.ruleType || "").toLowerCase();
     const haystack = `${type} ${rule.pattern || ""} ${rule.description || ""}`.toLowerCase();
-    if (haystack.includes("ng") || haystack.includes("禁止") || haystack.includes("avoid")) ngRules.push(rule);
+    if (/(^|[^a-z])ng([^a-z]|$)/i.test(haystack) || haystack.includes("禁止") || haystack.includes("avoid")) ngRules.push(rule);
     else specifiedRules.push(rule);
   }
   return { ngRules, specifiedRules, overriddenRules };
