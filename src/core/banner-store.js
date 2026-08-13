@@ -681,6 +681,8 @@ async function generateBannerPromptWithGuidance(projectRoot, banner, context, gu
       copyBrief: proposal.copyBrief || banner.copyBrief,
       promptJson: proposal.promptJson,
       promptText: proposal.promptText,
+      writtenImagePrompt: String(proposal.writtenImagePrompt || ""),
+      styleNotes: String(proposal.styleNotes || ""),
       reviewNotes: proposal.reviewNotes,
       structureSheet: proposal.promptJson?.structureSheet || null,
       regulationCheck: proposal.regulationCheck || null,

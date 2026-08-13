@@ -20,6 +20,8 @@ import {
   buildTemplateStructureContract,
   enforceTemplateStructure
 } from "./banner-template-structure.js";
+import { writeBannerImagePrompt } from "./banner-image-prompt-writer.js";
+import { buildBannerInputImageManifest, buildSelectedAssetPlacementPlan } from "./openai-image.js";
 
 export async function generateBannerCreativeProposal({
   banner,
@@ -31,7 +33,8 @@ export async function generateBannerCreativeProposal({
   copyBrief = null,
   creativeHypothesis = null,
   approvedClaimSnapshot = null,
-  jsonGenerator = openAiJson
+  jsonGenerator = openAiJson,
+  promptWriter = defaultPromptWriter()
 }) {
   const audit = createPromptGenerationAudit();
   try {
@@ -172,7 +175,23 @@ export async function generateBannerCreativeProposal({
       reason: "explicit_additional_instruction"
     }))
   }, template);
-  result.promptGenerationAudit = finalizePromptGenerationAudit(audit, "completed");
+  const writerResult = await runBannerImagePromptWriter({
+    promptWriter,
+    banner,
+    product: generationContext.product,
+    strategy: generationContext.strategy,
+    copyBrief: lockedCopyBrief,
+    colorDecision: result.colorDecision,
+    instructionPolicy,
+    diversityGuidance,
+    promptJson: result.promptJson
+  });
+  result.writtenImagePrompt = writerResult.writtenImagePrompt;
+  result.styleNotes = writerResult.styleNotes;
+  result.promptGenerationAudit = finalizePromptGenerationAudit({
+    ...audit,
+    writer: writerResult.writerAudit
+  }, "completed");
   return result;
   } catch (error) {
     error.promptGenerationAudit = finalizePromptGenerationAudit(audit, "failed", error);
@@ -212,6 +231,80 @@ function finalizePromptGenerationAudit(audit, outcome, error = null) {
 
 function sha256(value) {
   return `sha256:${crypto.createHash("sha256").update(String(value || "")).digest("hex")}`;
+}
+
+async function runBannerImagePromptWriter({
+  promptWriter,
+  banner,
+  product,
+  strategy,
+  copyBrief,
+  colorDecision,
+  instructionPolicy,
+  diversityGuidance,
+  promptJson
+}) {
+  const empty = {
+    writtenImagePrompt: "",
+    styleNotes: "",
+    writerAudit: {
+      model: resolvePromptWriterModel(),
+      calls: 0,
+      outputChars: 0,
+      outcome: "failed",
+      fallback: true
+    }
+  };
+  try {
+    const selectedAssetPlacements = buildSelectedAssetPlacementPlan(
+      promptJson?.zones,
+      buildBannerInputImageManifest(banner || {})
+    );
+    const written = await promptWriter({
+      promptJson,
+      product,
+      strategy,
+      copyBrief,
+      colorDecision,
+      templateStructureContract: promptJson?.templateStructureContract || null,
+      selectedAssetPlacements,
+      instructionPolicy,
+      diversityGuidance
+    });
+    return {
+      writtenImagePrompt: String(written?.writtenImagePrompt || ""),
+      styleNotes: String(written?.styleNotes || ""),
+      writerAudit: written?.writerAudit && typeof written.writerAudit === "object"
+        ? written.writerAudit
+        : empty.writerAudit
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function defaultPromptWriter() {
+  if (process.env.NODE_TEST_CONTEXT) return noopPromptWriter;
+  return writeBannerImagePrompt;
+}
+
+async function noopPromptWriter() {
+  return {
+    writtenImagePrompt: "",
+    styleNotes: "",
+    writerAudit: {
+      model: resolvePromptWriterModel(),
+      calls: 0,
+      outputChars: 0,
+      outcome: "failed",
+      fallback: true
+    }
+  };
+}
+
+function resolvePromptWriterModel() {
+  const configured = String(process.env.CMOAI_PROMPT_WRITER_MODEL || "").trim();
+  return configured || "claude-opus-5";
 }
 
 export function reapplyLockedSlotTexts(proposal, { copyBrief, copySlotPlan, template } = {}) {
