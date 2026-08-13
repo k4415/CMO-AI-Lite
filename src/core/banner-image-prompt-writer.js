@@ -3,6 +3,10 @@ import { loadPrompt } from "./prompt-files.js";
 
 const WRITER_SYSTEM = loadPrompt("banner-image-prompt-writer");
 const MIN_PROSE_CHARS = 200;
+// コピー開発用の予算を継承すると散文が途中で切れるため、ライター専用の枠を持つ。
+const WRITER_MAX_TOKENS = Number(process.env.CMOAI_PROMPT_WRITER_MAX_TOKENS) || 8000;
+// 実測55〜81秒。prompt工程のリースを超えないよう上限を明示する。
+const WRITER_TIMEOUT_MS = Number(process.env.CMOAI_PROMPT_WRITER_TIMEOUT_MS) || 180000;
 
 export async function writeBannerImagePrompt({
   promptJson,
@@ -38,7 +42,9 @@ export async function writeBannerImagePrompt({
       const parsed = await jsonGenerator({
         system: WRITER_SYSTEM,
         user,
-        model
+        model,
+        maxTokens: WRITER_MAX_TOKENS,
+        timeoutMs: WRITER_TIMEOUT_MS
       });
       const rawPrompt = String(parsed?.writtenImagePrompt || "");
       const rawNotes = String(parsed?.styleNotes || "");
@@ -135,8 +141,12 @@ function buildWriterUserPrompt({
       name: product?.name || "",
       category: product?.category || ""
     }),
+    // markdownがWHO-WHATの正本。旧構造化項目はmarkdownがない旧データのフォールバック。
     "戦略: " + JSON.stringify({
       id: strategy?.id || "",
+      conceptName: strategy?.conceptName || "",
+      segmentName: strategy?.segmentName || "",
+      markdown: String(strategy?.markdown || "").slice(0, 3000),
       targetAttributes: strategy?.targetAttributes || strategy?.target || "",
       desire: strategy?.desire || "",
       benefit: strategy?.benefit || "",

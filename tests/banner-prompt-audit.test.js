@@ -14,6 +14,14 @@ import { hashCopyBrief } from "../src/core/banner-copy-hash.js";
 import { generateBannerCreativeProposal, reapplyLockedSlotTexts } from "../src/core/banner-ai.js";
 import { buildBannerImagePrompt } from "../src/core/openai-image.js";
 
+// ライターは別テストで検証する。ここでは外部APIを呼ばないスタブを注入する。
+const stubPromptWriter = async () => ({
+  writtenImagePrompt: "",
+  styleNotes: "",
+  writerAudit: { model: "stub", calls: 0, outputChars: 0, outcome: "skipped", fallback: true }
+});
+
+
 test("prompt generation audit survives banner storage normalization", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-prompt-audit-store-"));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
@@ -190,6 +198,7 @@ test("Stage 2 uses one model design call and deterministically restores every lo
     ]
   };
   const proposal = await generateBannerCreativeProposal({
+    promptWriter: stubPromptWriter,
     banner: { id: "banner-1", imageSize: "1080x1080" },
     product: { id: "product-1", name: "商品" },
     strategy: { id: "strategy-1", markdown: "制作を速めたい" },

@@ -857,7 +857,13 @@ function clipWriterDesignBlocks(writtenImagePrompt, styleNotes, remaining) {
 
 function formatCompactColorScheme(colorScheme) {
   const palette = normalizePalette(colorScheme);
-  return COLOR_FIELDS.map((field) => `${field}=${palette[field] || ""}`).join(" / ");
+  const usage = colorScheme && typeof colorScheme === "object" && colorScheme.usage && typeof colorScheme.usage === "object"
+    ? colorScheme.usage
+    : {};
+  return COLOR_FIELDS.map((field) => {
+    const role = String(usage[field] || "").trim();
+    return `${field}=${palette[field] || ""}${role ? `(${role})` : ""}`;
+  }).join(" / ");
 }
 
 function assembleLegacyBannerImagePrompt(banner, context) {

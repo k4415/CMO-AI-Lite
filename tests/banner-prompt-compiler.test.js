@@ -8,9 +8,18 @@ import { buildTemplateStructureContract, enforceTemplateStructure } from "../src
 import { buildColorNeutralTemplateZones } from "../src/core/banner-template-color.js";
 import { buildCopySlotPlan } from "../src/core/banner-copy-slots.js";
 
+// ライターは別テストで検証する。ここでは外部APIを呼ばないスタブを注入する。
+const stubPromptWriter = async () => ({
+  writtenImagePrompt: "",
+  styleNotes: "",
+  writerAudit: { model: "stub", calls: 0, outputChars: 0, outcome: "skipped", fallback: true }
+});
+
+
 test("閉じたテンプレはStage 2モデルを呼ばず確定コピーからpromptJsonを生成する", async () => {
   let modelCalls = 0;
   const proposal = await generateBannerCreativeProposal({
+    promptWriter: stubPromptWriter,
     banner: { id: "banner-1", imageSize: "1080x1080" },
     product: { id: "product-1", name: "広告改善AI" },
     strategy: {
@@ -56,6 +65,7 @@ test("閉じたテンプレはStage 2モデルを呼ばず確定コピーからp
 
 test("決定論的promptも正本のWHO-WHAT markdownと案別variationを画像プロンプトへ残す", async () => {
   const proposal = await generateBannerCreativeProposal({
+    promptWriter: stubPromptWriter,
     banner: {
       id: "banner-2",
       imageSize: "1080x1080",
@@ -250,6 +260,7 @@ test("4つの配色シナリオを追加AIなしで最終promptまで統合す�
       slotTexts: copySlotPlan.slots.map((slot, index) => ({ slotId: slot.slotId, text: `確認${index + 1}` }))
     };
     const proposal = await generateBannerCreativeProposal({
+      promptWriter: stubPromptWriter,
       banner: { id: `banner-${scenario.name}`, imageSize: "1080x1080", ...(scenario.banner || {}) },
       product: { id: "product-color", name: "検証商品" },
       strategy: scenario.strategy,

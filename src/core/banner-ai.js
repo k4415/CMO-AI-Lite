@@ -186,8 +186,10 @@ export async function generateBannerCreativeProposal({
     diversityGuidance,
     promptJson: result.promptJson
   });
-  result.writtenImagePrompt = writerResult.writtenImagePrompt;
-  result.styleNotes = writerResult.styleNotes;
+  const regulatedWriterText = applyRegulationRulesToWriterText(writerResult, rules.ngRules, instructionPolicy);
+  result.writtenImagePrompt = regulatedWriterText.writtenImagePrompt;
+  result.styleNotes = regulatedWriterText.styleNotes;
+  result.regulationCheck = mergeRegulationCheck(result.regulationCheck, regulatedWriterText.regulationCheck);
   result.promptGenerationAudit = finalizePromptGenerationAudit({
     ...audit,
     writer: writerResult.writerAudit
@@ -284,21 +286,30 @@ async function runBannerImagePromptWriter({
 }
 
 function defaultPromptWriter() {
-  if (process.env.NODE_TEST_CONTEXT) return noopPromptWriter;
   return writeBannerImagePrompt;
 }
 
-async function noopPromptWriter() {
+// 散文もStage 2出力と同じNG表現置換を通す。ここを通さないと画像プロンプトの一部だけ規制をすり抜ける。
+function applyRegulationRulesToWriterText(writerResult, ngRules, instructionPolicy) {
+  const applied = applyRegulationRules({
+    writtenImagePrompt: String(writerResult?.writtenImagePrompt || ""),
+    styleNotes: String(writerResult?.styleNotes || "")
+  }, ngRules, instructionPolicy);
   return {
-    writtenImagePrompt: "",
-    styleNotes: "",
-    writerAudit: {
-      model: resolvePromptWriterModel(),
-      calls: 0,
-      outputChars: 0,
-      outcome: "failed",
-      fallback: true
-    }
+    writtenImagePrompt: applied.writtenImagePrompt,
+    styleNotes: applied.styleNotes,
+    regulationCheck: applied.regulationCheck
+  };
+}
+
+function mergeRegulationCheck(base, writerCheck) {
+  const baseHits = Array.isArray(base?.hits) ? base.hits : [];
+  const writerHits = Array.isArray(writerCheck?.hits) ? writerCheck.hits : [];
+  if (!writerHits.length) return base;
+  return {
+    ...(base && typeof base === "object" ? base : {}),
+    status: "replaced",
+    hits: [...baseHits, ...writerHits.map((hit) => ({ ...hit, scope: "writtenImagePrompt" }))]
   };
 }
 
