@@ -134,7 +134,11 @@ if (/(^|[^a-z])ng([^a-z]|$)/i.test(haystack) || haystack.includes("禁止") || h
 
 ### B. ライターへレギュレーション全文を渡す（`src/core/banner-image-prompt-writer.js`）
 
-`writeBannerImagePrompt` に `expressionRules` 引数を追加し、**分類せず・並べ替えず・`createdAt` 昇順（原文の順序）のまま**入力へ含める。見出し行（「組み合わせNG:」等）も落とさない。
+`writeBannerImagePrompt` に `expressionRules` 引数を追加し、**分類せず・`createdAt` 昇順（原文の順序）で**入力へ含める。見出し行（「組み合わせNG:」等）も落とさない。
+
+> ⚠️ **実装上の落とし穴**: JSONの**配列格納順は `createdAt` 昇順と一致しない**（実測で逆順。配列先頭は最後のNG項目「成果保証や煽りコピーに…」、`createdAt` 先頭は「このパレットは…」）。配列順のまま渡すと**NGリストが冒頭に来て見出しとの関係が壊れ、本施策の目的が達成できない**。必ず `createdAt` 昇順でソートしてから渡すこと。
+>
+> あわせて `classifyExpressionRules` と同じスコープ条件を適用する（`active !== false` かつ `!product.id || !rule.productId || rule.productId === product.id`）。分類はしないが、無効ルールと他商品のルールは除外する。
 
 ```js
 "表現レギュレーション（原文・記載順。見出しと配下項目の関係を読み取ること）:",
