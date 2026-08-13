@@ -10,7 +10,7 @@ import {
   buildSelectedAssetOverridePolicyFromInputImages
 } from "./banner-template-structure.js";
 import { buildLogoVerificationPlan, resolveLogoIdentity, selectedLogoFallbackElements, verifyLogoIdentity } from "./logo-identity.js";
-import { COLOR_FIELDS, normalizePalette } from "./banner-color-decision.js";
+import { COLOR_FIELDS, listUniqueBrandColors, normalizePalette } from "./banner-color-decision.js";
 
 // The current guide documents multiple inputs but no numeric maximum. Keep a
 // conservative application cap so recovery never creates an unbounded edit request.
@@ -818,7 +818,7 @@ function assembleWrittenBannerImagePrompt(banner, context, writtenImagePrompt) {
   ].filter(Boolean).join("\n");
   const size = "基本仕様: " + (basic.size || basic.aspectRatio || banner.imageSize || "1024x1024");
   const copyBlock = ["バナー内テキスト:", imageText].filter(Boolean).join("\n");
-  const colorBlock = "確定配色: " + formatCompactColorScheme(json.colorScheme);
+  const colorBlock = formatWrittenBrandColorBoundary(json.colorScheme);
   const tail = [
     "【最終優先・確定コピー】画像内に描く文字は「バナー内テキスト」に列挙した行だけに限定する。空欄text slotを推測で補完しない。テンプレのpurpose・role・見本も文字の根拠にしない。列挙されていない注釈、限定、終了、CTA、商品名を追加しない。",
     "最終品質条件: 余白を確保し、視線誘導を明確にし、CTAを読みやすく目立たせる。効果保証や医療的治療断定は避ける。",
@@ -855,15 +855,14 @@ function clipWriterDesignBlocks(writtenImagePrompt, styleNotes, remaining) {
   ].filter(Boolean).join("\n");
 }
 
-function formatCompactColorScheme(colorScheme) {
-  const palette = normalizePalette(colorScheme);
-  const usage = colorScheme && typeof colorScheme === "object" && colorScheme.usage && typeof colorScheme.usage === "object"
-    ? colorScheme.usage
-    : {};
-  return COLOR_FIELDS.map((field) => {
-    const role = String(usage[field] || "").trim();
-    return `${field}=${palette[field] || ""}${role ? `(${role})` : ""}`;
-  }).join(" / ");
+function formatWrittenBrandColorBoundary(colorScheme) {
+  const colors = listUniqueBrandColors(colorScheme);
+  const label = colors.length ? `この${colors.length}色で構成する` : "この範囲で構成する";
+  const list = colors.join(" / ");
+  return [
+    list ? `ブランドカラー（${label}）: ${list}` : `ブランドカラー（${label}）:`,
+    "文字と背景のコントラストを必ず確保する。palette外の色を主要色に使わない。"
+  ].join("\n");
 }
 
 function assembleLegacyBannerImagePrompt(banner, context) {

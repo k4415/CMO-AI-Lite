@@ -68,7 +68,7 @@ test("ライターへ戦略markdownを渡す", async () => {
   assert.equal(captured.strategy.markdown, strategyMarkdown);
 });
 
-test("散文アセンブリの確定配色は色役割も渡す", async () => {
+test("散文アセンブリの配色ブロックは色リストで渡し役割別HEXを書かない", async () => {
   const banner = {
     id: "banner-color",
     imageSize: "1080x1080",
@@ -91,6 +91,9 @@ test("散文アセンブリの確定配色は色役割も渡す", async () => {
   };
 
   const prompt = buildBannerImagePrompt(banner, []);
-  assert.match(prompt, /main=#16243A\(見出し・本文\)/);
-  assert.match(prompt, /accent=#9E2430\(CTA・バッジ\)/);
+  assert.match(prompt, /ブランドカラー（この4色で構成する）: #16243A \/ #C7A96B \/ #9E2430 \/ #F7F2E8/);
+  assert.match(prompt, /文字と背景のコントラストを必ず確保する。palette外の色を主要色に使わない。/);
+  assert.doesNotMatch(prompt, /確定配色:/);
+  assert.doesNotMatch(prompt, /main=#16243A/);
+  assert.doesNotMatch(prompt, /accent=#9E2430\(CTA・バッジ\)/);
 });
