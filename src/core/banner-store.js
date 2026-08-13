@@ -930,6 +930,8 @@ function applyPipelineArtifactInvalidation(patch, current, node, copyLocked = fa
   if (start <= order.indexOf("prompt")) {
     patch.promptJson = null;
     patch.promptText = "";
+    patch.writtenImagePrompt = "";
+    patch.styleNotes = "";
     patch.structureSheet = null;
     patch.reviewChecklist = null;
     patch.visualHypothesisRef = null;
@@ -1778,6 +1780,8 @@ function normalizeBanner(input) {
     templateFitDecision: input.templateFitDecision && typeof input.templateFitDecision === "object" ? input.templateFitDecision : null,
     promptJson: input.promptJson || null,
     promptText: clean(input.promptText),
+    writtenImagePrompt: clean(input.writtenImagePrompt),
+    styleNotes: clean(input.styleNotes),
     structureSheet: input.structureSheet || input.promptJson?.structureSheet || null,
     regulationCheck: input.regulationCheck || null,
     overriddenRules: Array.isArray(input.overriddenRules) ? input.overriddenRules : [],
