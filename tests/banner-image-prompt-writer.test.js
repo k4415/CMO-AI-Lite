@@ -198,3 +198,20 @@ test("ライタープロンプトに構造継承・コピー禁止・placement�
   assert.match(prompt, /被写体.*再解釈|無関係な被写体/);
   assert.match(prompt, /図形コンテナ|吹き出し/);
 });
+
+test("ライタープロンプトは色境界・コントラスト確保・見出しと配下の関係を指示する", () => {
+  const promptPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "config",
+    "prompts",
+    "banner-image-prompt-writer.md"
+  );
+  const prompt = fs.readFileSync(promptPath, "utf8");
+  assert.match(prompt, /ブランドカラーの範囲で構成/);
+  assert.match(prompt, /どの面にどの文字色/);
+  assert.match(prompt, /コントラストを必ず確保/);
+  assert.match(prompt, /組み合わせOK:|組み合わせNG:|推奨比率:/);
+  assert.match(prompt, /見出し.*配下項目の関係|配下項目の関係を尊重/);
+  assert.match(prompt, /NG側に列挙された配色・表現は採用しない/);
+});
