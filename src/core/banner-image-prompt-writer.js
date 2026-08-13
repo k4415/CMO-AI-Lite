@@ -1,4 +1,5 @@
 import { anthropicJson } from "./anthropic-text.js";
+import { listUniqueBrandColors } from "./banner-color-decision.js";
 import { loadPrompt } from "./prompt-files.js";
 
 const WRITER_SYSTEM = loadPrompt("banner-image-prompt-writer");
@@ -18,6 +19,7 @@ export async function writeBannerImagePrompt({
   selectedAssetPlacements,
   instructionPolicy,
   diversityGuidance,
+  expressionRules,
   jsonGenerator = anthropicJson
 } = {}) {
   const model = resolveWriterModel();
@@ -30,7 +32,8 @@ export async function writeBannerImagePrompt({
     templateStructureContract,
     selectedAssetPlacements,
     instructionPolicy,
-    diversityGuidance
+    diversityGuidance,
+    expressionRules
   });
   const slotTexts = Array.isArray(copyBrief?.slotTexts) ? copyBrief.slotTexts : [];
   const calls = [];
@@ -128,7 +131,8 @@ function buildWriterUserPrompt({
   templateStructureContract,
   selectedAssetPlacements,
   instructionPolicy,
-  diversityGuidance
+  diversityGuidance,
+  expressionRules
 }) {
   const slots = (Array.isArray(copyBrief?.slotTexts) ? copyBrief.slotTexts : []).map((slot) => ({
     slotId: String(slot?.slotId || ""),
@@ -153,11 +157,36 @@ function buildWriterUserPrompt({
       offer: strategy?.offer || ""
     }),
     "タイポグラフィ参照（文言は書かない）: " + JSON.stringify(slots),
-    "配色palette: " + JSON.stringify(colorDecision?.palette || {}),
+    formatBrandColorBoundary(colorDecision?.palette),
+    formatExpressionRulesForWriter(expressionRules, product),
     "テンプレ構造契約: " + JSON.stringify(templateStructureContract || {}),
     "選択素材の配置マップ: " + JSON.stringify(selectedAssetPlacements || []),
     "追加指示方針: " + JSON.stringify(instructionPolicy || {}),
     "多様性方針: " + JSON.stringify(diversityGuidance || {}),
     "promptJson: " + JSON.stringify(promptJson || {})
+  ].filter(Boolean).join("\n");
+}
+
+function formatBrandColorBoundary(palette) {
+  const colors = listUniqueBrandColors(palette);
+  if (!colors.length) return "ブランドカラー（この範囲で構成する）:";
+  return `ブランドカラー（この範囲で構成する）: ${colors.join(" / ")}`;
+}
+
+function formatExpressionRulesForWriter(expressionRules, product) {
+  const rules = sortExpressionRulesByCreatedAt(scopeExpressionRules(expressionRules, product));
+  return [
+    "表現レギュレーション（原文・記載順。見出しと配下項目の関係を読み取ること）:",
+    ...rules.map((rule) => `- ${rule.description || rule.pattern || ""}`)
   ].join("\n");
+}
+
+function scopeExpressionRules(expressionRules, product) {
+  return (Array.isArray(expressionRules) ? expressionRules : []).filter((item) => (
+    item.active !== false && (!product?.id || !item.productId || item.productId === product.id)
+  ));
+}
+
+function sortExpressionRulesByCreatedAt(rules) {
+  return [...rules].sort((left, right) => String(left?.createdAt || "").localeCompare(String(right?.createdAt || "")));
 }

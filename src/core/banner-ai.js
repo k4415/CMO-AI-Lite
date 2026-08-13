@@ -184,7 +184,8 @@ export async function generateBannerCreativeProposal({
     colorDecision: result.colorDecision,
     instructionPolicy,
     diversityGuidance,
-    promptJson: result.promptJson
+    promptJson: result.promptJson,
+    expressionRules
   });
   const regulatedWriterText = applyRegulationRulesToWriterText(writerResult, rules.ngRules, instructionPolicy);
   result.writtenImagePrompt = regulatedWriterText.writtenImagePrompt;
@@ -244,7 +245,8 @@ async function runBannerImagePromptWriter({
   colorDecision,
   instructionPolicy,
   diversityGuidance,
-  promptJson
+  promptJson,
+  expressionRules
 }) {
   const empty = {
     writtenImagePrompt: "",
@@ -271,7 +273,8 @@ async function runBannerImagePromptWriter({
       templateStructureContract: promptJson?.templateStructureContract || null,
       selectedAssetPlacements,
       instructionPolicy,
-      diversityGuidance
+      diversityGuidance,
+      expressionRules
     });
     return {
       writtenImagePrompt: String(written?.writtenImagePrompt || ""),
