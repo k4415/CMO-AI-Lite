@@ -10,7 +10,7 @@ import {
   buildSelectedAssetOverridePolicyFromInputImages
 } from "./banner-template-structure.js";
 import { buildLogoVerificationPlan, resolveLogoIdentity, selectedLogoFallbackElements, verifyLogoIdentity } from "./logo-identity.js";
-import { COLOR_FIELDS, normalizePalette } from "./banner-color-decision.js";
+import { COLOR_FIELDS, listUniqueBrandColors, normalizePalette } from "./banner-color-decision.js";
 
 // The current guide documents multiple inputs but no numeric maximum. Keep a
 // conservative application cap so recovery never creates an unbounded edit request.
@@ -734,8 +734,21 @@ function mimeFor(filePath) {
   return "application/octet-stream";
 }
 
+const BANNER_IMAGE_PROMPT_BUDGET = 12000;
+const WRITTEN_IMAGE_PROMPT_CAP = 11000;
+
 export function buildBannerImagePrompt(banner, inputImages = buildBannerInputImageManifest(banner)) {
   assertBannerImageColorContract(banner);
+  const context = buildBannerImagePromptContext(banner, inputImages);
+  const writtenImagePrompt = String(banner.writtenImagePrompt || "").trim();
+  if (writtenImagePrompt) {
+    const assembled = assembleWrittenBannerImagePrompt(banner, context, writtenImagePrompt);
+    if (assembled) return assembled;
+  }
+  return assembleLegacyBannerImagePrompt(banner, context);
+}
+
+function buildBannerImagePromptContext(banner, inputImages) {
   const json = banner.promptJson || {};
   const basic = json.basic || {};
   const zones = Array.isArray(json.zones) ? json.zones : [];
@@ -781,6 +794,79 @@ export function buildBannerImagePrompt(banner, inputImages = buildBannerInputIma
     ].filter(Boolean).join("\n");
   }).join("\n\n");
   const imageText = removeLogoElementText(banner.imageText || collectZoneText(zones), zones, hasLogoInput);
+  return {
+    json,
+    basic,
+    inputImages,
+    templateStructureInstruction,
+    selectedAssetPlacements,
+    finalLogoInstruction,
+    zoneInstructions,
+    imageText
+  };
+}
+
+function assembleWrittenBannerImagePrompt(banner, context, writtenImagePrompt) {
+  const { json, basic, inputImages, templateStructureInstruction, selectedAssetPlacements, finalLogoInstruction, imageText } = context;
+  const head = [
+    "日本語のダイレクト広告バナーを制作してください。",
+    "モデルはgpt-image-2を使用しています。",
+    templateStructureInstruction,
+    buildAttachedImageInstruction(inputImages, json.templateStructureContract, selectedAssetPlacements),
+    "画像内テキストは後処理で合成せず、画像生成時点で自然に配置してください。",
+    "ただし日本語は読みやすさを最優先し、文字化け、崩れ、重なり、切れを避けてください。"
+  ].filter(Boolean).join("\n");
+  const size = "基本仕様: " + (basic.size || basic.aspectRatio || banner.imageSize || "1024x1024");
+  const copyBlock = ["バナー内テキスト:", imageText].filter(Boolean).join("\n");
+  const colorBlock = formatWrittenBrandColorBoundary(json.colorScheme);
+  const tail = [
+    "【最終優先・確定コピー】画像内に描く文字は「バナー内テキスト」に列挙した行だけに限定する。空欄text slotを推測で補完しない。テンプレのpurpose・role・見本も文字の根拠にしない。列挙されていない注釈、限定、終了、CTA、商品名を追加しない。",
+    "最終品質条件: 余白を確保し、視線誘導を明確にし、CTAを読みやすく目立たせる。効果保証や医療的治療断定は避ける。",
+    finalLogoInstruction,
+    json.additionalInstruction ? "【追加指示原文・既存要素内で反映】" + json.additionalInstruction : "",
+    json.templateStructureContract?.closed ? "【最終優先・構造再確認】追加指示は既存elementの色・書体・余白・内容表現の範囲で反映し、契約にない線・下線・カード・バッジ・画像・装飾を増やさない。" : "",
+    buildFinalSelectedAssetInstruction(inputImages, selectedAssetPlacements)
+  ].filter(Boolean).join("\n");
+  const deterministic = [head, size, copyBlock, colorBlock, tail].filter(Boolean).join("\n");
+  const remaining = BANNER_IMAGE_PROMPT_BUDGET - deterministic.length - 1;
+  if (remaining <= 0) return "";
+  const clipped = clipWriterDesignBlocks(writtenImagePrompt, banner.styleNotes, remaining);
+  return [head, size, clipped, copyBlock, colorBlock, tail].filter(Boolean).join("\n");
+}
+
+function clipWriterDesignBlocks(writtenImagePrompt, styleNotes, remaining) {
+  let prose = String(writtenImagePrompt || "").trim();
+  let notes = String(styleNotes || "").trim();
+  if (prose.length > WRITTEN_IMAGE_PROMPT_CAP) prose = prose.slice(0, WRITTEN_IMAGE_PROMPT_CAP);
+  const proseLabel = "【デザイン完成イメージ】\n";
+  const notesLabel = "\nデザイン意図:\n";
+  const designLength = () => proseLabel.length + prose.length + (notes ? notesLabel.length + notes.length : 0);
+  if (designLength() > remaining) {
+    const notesBudget = remaining - proseLabel.length - prose.length - notesLabel.length;
+    notes = notesBudget > 0 ? notes.slice(0, notesBudget) : "";
+  }
+  if (designLength() > remaining) {
+    const proseBudget = remaining - proseLabel.length - (notes ? notesLabel.length + notes.length : 0);
+    prose = proseBudget > 0 ? prose.slice(0, proseBudget) : "";
+  }
+  return [
+    proseLabel + prose,
+    notes ? `デザイン意図:\n${notes}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function formatWrittenBrandColorBoundary(colorScheme) {
+  const colors = listUniqueBrandColors(colorScheme);
+  const label = colors.length ? `この${colors.length}色で構成する` : "この範囲で構成する";
+  const list = colors.join(" / ");
+  return [
+    list ? `ブランドカラー（${label}）: ${list}` : `ブランドカラー（${label}）:`,
+    "文字と背景のコントラストを必ず確保する。palette外の色を主要色に使わない。"
+  ].join("\n");
+}
+
+function assembleLegacyBannerImagePrompt(banner, context) {
+  const { json, basic, inputImages, templateStructureInstruction, selectedAssetPlacements, finalLogoInstruction, zoneInstructions, imageText } = context;
   return [
     "日本語のダイレクト広告バナーを制作してください。",
     "モデルはgpt-image-2を使用しています。",

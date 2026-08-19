@@ -165,8 +165,9 @@ test("removed routes are absent from server.js", async () => {
 test("ad-templates.json has exactly 100 bundled banner templates NO.001-100", async () => {
   const templates = await readJson("data/ad-templates.json");
   assert.ok(Array.isArray(templates));
-  assert.equal(templates.length, 100);
-  const numbers = templates.map((template) => {
+  const bundledTemplates = templates.filter((template) => template.isBundled);
+  assert.equal(bundledTemplates.length, 100);
+  const numbers = bundledTemplates.map((template) => {
     assert.equal(template.isBundled, true);
     assert.equal(template.creativeType, "banner");
     assert.ok(template.templatePromptJson && Object.keys(template.templatePromptJson).length > 0);

@@ -20,6 +20,8 @@ import {
   buildTemplateStructureContract,
   enforceTemplateStructure
 } from "./banner-template-structure.js";
+import { writeBannerImagePrompt } from "./banner-image-prompt-writer.js";
+import { buildBannerInputImageManifest, buildSelectedAssetPlacementPlan } from "./openai-image.js";
 
 export async function generateBannerCreativeProposal({
   banner,
@@ -31,7 +33,8 @@ export async function generateBannerCreativeProposal({
   copyBrief = null,
   creativeHypothesis = null,
   approvedClaimSnapshot = null,
-  jsonGenerator = openAiJson
+  jsonGenerator = openAiJson,
+  promptWriter = defaultPromptWriter()
 }) {
   const audit = createPromptGenerationAudit();
   try {
@@ -172,7 +175,26 @@ export async function generateBannerCreativeProposal({
       reason: "explicit_additional_instruction"
     }))
   }, template);
-  result.promptGenerationAudit = finalizePromptGenerationAudit(audit, "completed");
+  const writerResult = await runBannerImagePromptWriter({
+    promptWriter,
+    banner,
+    product: generationContext.product,
+    strategy: generationContext.strategy,
+    copyBrief: lockedCopyBrief,
+    colorDecision: result.colorDecision,
+    instructionPolicy,
+    diversityGuidance,
+    promptJson: result.promptJson,
+    expressionRules
+  });
+  const regulatedWriterText = applyRegulationRulesToWriterText(writerResult, rules.ngRules, instructionPolicy);
+  result.writtenImagePrompt = regulatedWriterText.writtenImagePrompt;
+  result.styleNotes = regulatedWriterText.styleNotes;
+  result.regulationCheck = mergeRegulationCheck(result.regulationCheck, regulatedWriterText.regulationCheck);
+  result.promptGenerationAudit = finalizePromptGenerationAudit({
+    ...audit,
+    writer: writerResult.writerAudit
+  }, "completed");
   return result;
   } catch (error) {
     error.promptGenerationAudit = finalizePromptGenerationAudit(audit, "failed", error);
@@ -212,6 +234,91 @@ function finalizePromptGenerationAudit(audit, outcome, error = null) {
 
 function sha256(value) {
   return `sha256:${crypto.createHash("sha256").update(String(value || "")).digest("hex")}`;
+}
+
+async function runBannerImagePromptWriter({
+  promptWriter,
+  banner,
+  product,
+  strategy,
+  copyBrief,
+  colorDecision,
+  instructionPolicy,
+  diversityGuidance,
+  promptJson,
+  expressionRules
+}) {
+  const empty = {
+    writtenImagePrompt: "",
+    styleNotes: "",
+    writerAudit: {
+      model: resolvePromptWriterModel(),
+      calls: 0,
+      outputChars: 0,
+      outcome: "failed",
+      fallback: true
+    }
+  };
+  try {
+    const selectedAssetPlacements = buildSelectedAssetPlacementPlan(
+      promptJson?.zones,
+      buildBannerInputImageManifest(banner || {})
+    );
+    const written = await promptWriter({
+      promptJson,
+      product,
+      strategy,
+      copyBrief,
+      colorDecision,
+      templateStructureContract: promptJson?.templateStructureContract || null,
+      selectedAssetPlacements,
+      instructionPolicy,
+      diversityGuidance,
+      expressionRules
+    });
+    return {
+      writtenImagePrompt: String(written?.writtenImagePrompt || ""),
+      styleNotes: String(written?.styleNotes || ""),
+      writerAudit: written?.writerAudit && typeof written.writerAudit === "object"
+        ? written.writerAudit
+        : empty.writerAudit
+    };
+  } catch {
+    return empty;
+  }
+}
+
+function defaultPromptWriter() {
+  return writeBannerImagePrompt;
+}
+
+// 散文もStage 2出力と同じNG表現置換を通す。ここを通さないと画像プロンプトの一部だけ規制をすり抜ける。
+function applyRegulationRulesToWriterText(writerResult, ngRules, instructionPolicy) {
+  const applied = applyRegulationRules({
+    writtenImagePrompt: String(writerResult?.writtenImagePrompt || ""),
+    styleNotes: String(writerResult?.styleNotes || "")
+  }, ngRules, instructionPolicy);
+  return {
+    writtenImagePrompt: applied.writtenImagePrompt,
+    styleNotes: applied.styleNotes,
+    regulationCheck: applied.regulationCheck
+  };
+}
+
+function mergeRegulationCheck(base, writerCheck) {
+  const baseHits = Array.isArray(base?.hits) ? base.hits : [];
+  const writerHits = Array.isArray(writerCheck?.hits) ? writerCheck.hits : [];
+  if (!writerHits.length) return base;
+  return {
+    ...(base && typeof base === "object" ? base : {}),
+    status: "replaced",
+    hits: [...baseHits, ...writerHits.map((hit) => ({ ...hit, scope: "writtenImagePrompt" }))]
+  };
+}
+
+function resolvePromptWriterModel() {
+  const configured = String(process.env.CMOAI_PROMPT_WRITER_MODEL || "").trim();
+  return configured || "claude-opus-5";
 }
 
 export function reapplyLockedSlotTexts(proposal, { copyBrief, copySlotPlan, template } = {}) {
@@ -639,7 +746,19 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
       contrastPolicy: modelDesign.contrastPolicy || templateDesign.contrastPolicy || { level: "high", note: "CTA and main copy must stand out" },
       visualStyle: resolvedVisualStyle,
       gridAlignment: modelDesign.gridAlignment || templateDesign.gridAlignment || { horizontal: "structured alignment", vertical: "zone based", note: "maintain template-like hierarchy" },
-      designRationale: stripTemplateColorTokens(modelDesign.designRationale || promptJson.visualDirection || diversityGuidance?.axisInstruction || "")
+      designRationale: stripTemplateColorTokens(
+        modelDesign.designRationale
+        || promptJson.globalDesign?.designRationale
+        || templateDesign.designRationale
+        || promptJson.visualDirection
+        || diversityGuidance?.axisInstruction
+        || ""
+      ),
+      colorPolicy: String(
+        modelDesign.colorPolicy
+        || promptJson.globalDesign?.colorPolicy
+        || "テンプレ由来の色表現は役割・トーンの参考。具体色は確定パレット（colorScheme）に必ず従う"
+      )
     },
     colorScheme: resolvedColorScheme,
     zones,
@@ -757,6 +876,7 @@ function normalizeZones(zones, copyBrief, copySlotPlan = null, product = {}) {
     purpose: String(zone.purpose || zone.role || ""),
     backgroundColorRole: String(zone.backgroundColorRole || ""),
     background: String(zone.background || ""),
+    backgroundStyle: String(zone.backgroundStyle || ""),
     elements: (Array.isArray(zone.elements) ? zone.elements : []).map((element, elementIndex) => {
       const type = String(element.type || "text");
       const normalized = {
@@ -1060,7 +1180,7 @@ export function classifyExpressionRules(expressionRules, product, instructionPol
     }
     const type = String(rule.ruleType || "").toLowerCase();
     const haystack = `${type} ${rule.pattern || ""} ${rule.description || ""}`.toLowerCase();
-    if (haystack.includes("ng") || haystack.includes("禁止") || haystack.includes("avoid")) ngRules.push(rule);
+    if (/(^|[^a-z])ng([^a-z]|$)/i.test(haystack) || haystack.includes("禁止") || haystack.includes("avoid")) ngRules.push(rule);
     else specifiedRules.push(rule);
   }
   return { ngRules, specifiedRules, overriddenRules };

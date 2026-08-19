@@ -69,6 +69,19 @@ export function normalizePalette(value) {
   return palette;
 }
 
+export function listUniqueBrandColors(value) {
+  const palette = normalizePalette(value);
+  const seen = new Set();
+  const colors = [];
+  for (const field of COLOR_FIELDS) {
+    const color = palette[field];
+    if (!color || seen.has(color)) continue;
+    seen.add(color);
+    colors.push(color);
+  }
+  return colors;
+}
+
 export function extractPaletteFromText(value) {
   const text = String(value ?? "").normalize("NFKC");
   if (!text.trim()) return {};

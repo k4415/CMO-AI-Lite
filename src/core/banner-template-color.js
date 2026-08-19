@@ -40,7 +40,14 @@ export function buildColorNeutralTemplateZones(templateZones, templateColorSchem
   const sourcePalette = normalizePalette(templateColorScheme);
   return (Array.isArray(templateZones) ? templateZones : []).map((zone) => {
     const nextZone = cloneJsonValue(zone) || {};
+    nextZone.backgroundStyle = mergeBackgroundStyle(
+      nextZone.backgroundStyle,
+      stripTemplateColorTokens(String(nextZone.background || ""))
+    );
     delete nextZone.background;
+    if (typeof nextZone.backgroundStyle === "string") {
+      nextZone.backgroundStyle = stripTemplateColorTokens(nextZone.backgroundStyle);
+    }
     nextZone.backgroundColorRole = "background";
     nextZone.elements = (Array.isArray(zone?.elements) ? zone.elements : []).map((element) => {
       const next = cloneJsonValue(element) || {};
@@ -158,6 +165,7 @@ function collectAuditTargets(promptJson) {
   pushNestedTargets(targets, "globalDesign.visualStyle", promptJson?.globalDesign?.visualStyle);
   for (const [zoneIndex, zone] of (Array.isArray(promptJson?.zones) ? promptJson.zones : []).entries()) {
     targets.push({ path: `zones[${zoneIndex}].background`, value: zone?.background });
+    targets.push({ path: `zones[${zoneIndex}].backgroundStyle`, value: zone?.backgroundStyle });
     for (const [elementIndex, element] of (Array.isArray(zone?.elements) ? zone.elements : []).entries()) {
       const prefix = `zones[${zoneIndex}].elements[${elementIndex}]`;
       targets.push({ path: `${prefix}.color`, value: element?.color });
@@ -197,4 +205,11 @@ function uniqueObjects(values) {
 function cloneJsonValue(value) {
   if (value === undefined) return undefined;
   return value && typeof value === "object" ? structuredClone(value) : value;
+}
+
+function mergeBackgroundStyle(existing, incoming) {
+  const left = stripTemplateColorTokens(String(existing || ""));
+  const right = stripTemplateColorTokens(String(incoming || ""));
+  if (left && right && left !== right) return `${left} / ${right}`;
+  return left || right;
 }

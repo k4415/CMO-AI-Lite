@@ -4,18 +4,50 @@ import fs from "node:fs";
 
 import { buildBannerDesignPrompt, normalizeBannerProposal } from "../src/core/banner-ai.js";
 import { buildBannerImagePrompt, buildBannerInputImageManifest } from "../src/core/openai-image.js";
+import { compileClosedTemplatePromptSeed } from "../src/core/banner-prompt-compiler.js";
 import {
   assertTemplateImageCapacity,
   buildSelectedAssetOverridePolicy,
-  buildTemplateStructureContract
+  buildTemplateStructureContract,
+  enforceTemplateStructure
 } from "../src/core/banner-template-structure.js";
 import { buildColorNeutralTemplateZones } from "../src/core/banner-template-color.js";
 
 const templates = JSON.parse(fs.readFileSync(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
 const TEMPLATE_IDS = ["tpl_default_026", "tpl_default_042", "tpl_default_009"];
 
-test("全100テンプレのzone・elementを上限で切り捨てず閉じた契約へ含める", () => {
-  assert.equal(templates.length, 100);
+test("enforceTemplateStructureはzone.nameとbackgroundとfontをseedから保持する", () => {
+  const templateZones = [{
+    name: "topIdentityAndTarget",
+    position: "top-left",
+    purpose: "商品名と対象者を冒頭で提示する",
+    background: "青いロゴプレートと白い角丸カード",
+    elements: [{
+      type: "text",
+      slotId: "z1e1",
+      role: "headline",
+      font: "extra-bold Japanese gothic, white on blue plate"
+    }]
+  }];
+  const neutral = buildColorNeutralTemplateZones(templateZones, {});
+  const generatedZones = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1080x1080" },
+    template: { templateZones },
+    copyBrief: { slotTexts: [{ slotId: "z1e1", text: "見出し" }] }
+  }).promptJson.zones;
+  const enforced = enforceTemplateStructure({ templateZones: neutral, generatedZones });
+
+  assert.equal(enforced.zones[0].name, "topIdentityAndTarget");
+  assert.match(enforced.zones[0].backgroundStyle, /ロゴプレート/);
+  assert.doesNotMatch(enforced.zones[0].backgroundStyle, /青|白/);
+  assert.match(enforced.zones[0].purpose, /構造/);
+  assert.doesNotMatch(enforced.zones[0].purpose, /商品名と対象者/);
+  assert.match(enforced.zones[0].elements[0].font, /extra-bold Japanese gothic/);
+  assert.doesNotMatch(enforced.zones[0].elements[0].font, /white|blue/i);
+});
+
+test("配布100件を維持し、全登録テンプレのzone・elementを上限で切り捨てず閉じた契約へ含める", () => {
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
   for (const template of templates) {
     const contract = buildTemplateStructureContract(template.templateZones);
     const expectedZoneCount = template.templateZones.length;

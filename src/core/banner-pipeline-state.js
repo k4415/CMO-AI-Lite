@@ -12,8 +12,8 @@ export const PIPELINE_NODE_ORDER = [
 
 export const PIPELINE_POLICY_VERSIONS = Object.freeze({
   copyplan: 2,
-  prompt: 2,
-  image: 1
+  prompt: 4,
+  image: 2
 });
 
 const NODE_STATUSES = new Set(["pending", "running", "completed", "failed"]);
@@ -122,7 +122,7 @@ export function buildPipelineInputHashes(context = {}) {
   const snapshotHash = clean(context.approvedClaimSnapshot?.contentHash || banner.approvedClaimSnapshot?.contentHash);
   const hypothesisHash = clean(context.creativeHypothesis?.contentHash || banner.creativeHypothesis?.contentHash);
   const copyBriefHash = clean(banner.copyBrief?.copyBriefHash || context.copyBrief?.copyBriefHash);
-  const promptOutputHash = hashPromptOutput(banner.promptJson, banner.promptText);
+  const promptOutputHash = hashPromptOutput(banner);
   const referenceAssets = normalizeReferenceAssets(context.referenceAssets, banner);
   const expressionRules = normalizeExpressionRules(context.expressionRules);
   const copySlotPlan = normalizeCopySlotPlan(context.copySlotPlan);
@@ -152,6 +152,8 @@ export function buildPipelineInputHashes(context = {}) {
     promptOutputHash,
     promptText: clean(banner.promptText),
     promptJson: banner.promptJson && typeof banner.promptJson === "object" ? banner.promptJson : null,
+    writtenImagePrompt: clean(banner.writtenImagePrompt),
+    styleNotes: clean(banner.styleNotes),
     imageSize: clean(banner.imageSize || "1080x1080"),
     referenceAssets,
     provider: "openai",
@@ -170,7 +172,7 @@ export function buildPipelineOutputHashes(context = {}) {
   const copyplanOutput = copyOutput && hypothesisOutput
     ? hashObject({ copyBriefHash: copyBrief.copyBriefHash, hypothesisHash: hypothesis.contentHash })
     : copyOutput;
-  const promptOutput = hashPromptOutput(banner.promptJson, banner.promptText);
+  const promptOutput = hashPromptOutput(banner);
   const imageOutput = banner.generatedImagePath && banner.generatedImageHash
     ? hashObject({
         path: clean(banner.generatedImagePath),
@@ -251,9 +253,16 @@ function normalizeReviewEvidence(banner) {
   return Object.values(evidence).some(Boolean) ? evidence : null;
 }
 
-function hashPromptOutput(promptJson, promptText) {
+function hashPromptOutput(banner = {}) {
+  const promptJson = banner.promptJson;
+  const promptText = banner.promptText;
   if (!promptJson || typeof promptJson !== "object" || !Object.keys(promptJson).length || !clean(promptText)) return "";
-  return hashObject({ promptJson, promptText: clean(promptText) });
+  return hashObject({
+    promptJson,
+    promptText: clean(promptText),
+    writtenImagePrompt: clean(banner.writtenImagePrompt),
+    styleNotes: clean(banner.styleNotes)
+  });
 }
 
 function normalizeStrategy(value = {}) {

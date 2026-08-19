@@ -681,6 +681,8 @@ async function generateBannerPromptWithGuidance(projectRoot, banner, context, gu
       copyBrief: proposal.copyBrief || banner.copyBrief,
       promptJson: proposal.promptJson,
       promptText: proposal.promptText,
+      writtenImagePrompt: String(proposal.writtenImagePrompt || ""),
+      styleNotes: String(proposal.styleNotes || ""),
       reviewNotes: proposal.reviewNotes,
       structureSheet: proposal.promptJson?.structureSheet || null,
       regulationCheck: proposal.regulationCheck || null,
@@ -849,7 +851,7 @@ export async function updateBannerCreative(projectRoot, bannerId, patch) {
       const revisionPolicy = buildInstructionPolicy(normalizedPatch.revisionInstruction);
       const copyProtectedVisualEdit = revisionPolicy.protectedFields.includes("copyBrief")
         && revisionPolicy.editableFields.includes("imageElements");
-      invalidateFrom = earlierPipelineNode(invalidateFrom, revisionPolicy.changeScope === "visual_only" || copyProtectedVisualEdit ? "prompt" : "copy");
+      invalidateFrom = earlierPipelineNode(invalidateFrom, revisionPolicy.changeScope === "visual_only" || copyProtectedVisualEdit ? "prompt" : "copyplan");
     }
     const nextInstruction = [
       Object.prototype.hasOwnProperty.call(normalizedPatch, "additionalInstruction") ? normalizedPatch.additionalInstruction : current.additionalInstruction,
@@ -930,6 +932,8 @@ function applyPipelineArtifactInvalidation(patch, current, node, copyLocked = fa
   if (start <= order.indexOf("prompt")) {
     patch.promptJson = null;
     patch.promptText = "";
+    patch.writtenImagePrompt = "";
+    patch.styleNotes = "";
     patch.structureSheet = null;
     patch.reviewChecklist = null;
     patch.visualHypothesisRef = null;
@@ -1778,6 +1782,8 @@ function normalizeBanner(input) {
     templateFitDecision: input.templateFitDecision && typeof input.templateFitDecision === "object" ? input.templateFitDecision : null,
     promptJson: input.promptJson || null,
     promptText: clean(input.promptText),
+    writtenImagePrompt: clean(input.writtenImagePrompt),
+    styleNotes: clean(input.styleNotes),
     structureSheet: input.structureSheet || input.promptJson?.structureSheet || null,
     regulationCheck: input.regulationCheck || null,
     overriddenRules: Array.isArray(input.overriddenRules) ? input.overriddenRules : [],
