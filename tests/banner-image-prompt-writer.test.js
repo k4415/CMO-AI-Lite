@@ -308,12 +308,13 @@ test("1回目失敗後のリトライ成功ではcompletedになりfallbackし�
   assert.equal(result.writerAudit.fallback, false);
 });
 
-test("監査アダプタはmodel/calls/outputChars/outcome/fallbackを記録する", async () => {
+test("監査アダプタはmodel/calls/outputChars/outcome/fallback/attemptsを記録する", async () => {
   const result = await writeBannerImagePrompt({
     ...baseInput(),
     jsonGenerator: async () => ({ writtenImagePrompt: LONG_PROSE, styleNotes: "質感メモ" })
   });
   assert.deepEqual(Object.keys(result.writerAudit).sort(), [
+    "attempts",
     "calls",
     "fallback",
     "model",
@@ -322,6 +323,79 @@ test("監査アダプタはmodel/calls/outputChars/outcome/fallbackを記録す�
   ]);
   assert.equal(typeof result.writerAudit.outputChars, "number");
   assert.ok(result.writerAudit.outputChars >= LONG_PROSE.length);
+  assert.equal(result.writerAudit.attempts.length, 1);
+  assert.equal(result.writerAudit.attempts[0].attempt, 1);
+  assert.equal(result.writerAudit.attempts[0].ok, true);
+  assert.equal(result.writerAudit.attempts[0].errorClass, "");
+});
+
+test("API例外はerrorClass=api_errorでattemptsに記録する", async () => {
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      throw new Error("writer down");
+    }
+  });
+
+  assert.equal(result.writerAudit.attempts.length, 2);
+  assert.equal(result.writerAudit.attempts[0].errorClass, "api_error");
+  assert.equal(result.writerAudit.attempts[1].errorClass, "api_error");
+  assert.equal(result.writerAudit.attempts[0].ok, false);
+});
+
+test("タイムアウトはerrorClass=timeoutで記録する", async () => {
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      const error = new Error("Anthropicのコピー設計が時間内に完了しなかったため中断しました。再実行してください。");
+      error.name = "TimeoutError";
+      throw error;
+    }
+  });
+
+  assert.equal(result.writerAudit.attempts[0].errorClass, "timeout");
+});
+
+test("JSONパース失敗はerrorClass=parse_errorで記録する", async () => {
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      throw new Error("AI応答がJSON形式ではありませんでした。");
+    }
+  });
+
+  assert.equal(result.writerAudit.attempts[0].errorClass, "parse_error");
+});
+
+test("ヘッダー欠落はerrorClass=header_missingで記録する", async () => {
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => ({
+      writtenImagePrompt: LONG_PROSE_WITHOUT_HEADERS,
+      styleNotes: "質感メモ"
+    })
+  });
+
+  assert.equal(result.writerAudit.attempts.length, 2);
+  assert.equal(result.writerAudit.attempts[0].errorClass, "header_missing");
+  assert.equal(result.writerAudit.attempts[1].errorClass, "header_missing");
+});
+
+test("200字未満はerrorClass=too_shortで記録する", async () => {
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => ({
+      writtenImagePrompt: [
+        "形式：1080x1080の正方形広告バナー。",
+        "目的・戦略：短い訴求。",
+        "スタイル・トーン：短いトーン。",
+        "今朝届く贈答を大きく置く短い描写"
+      ].join("\n"),
+      styleNotes: "今すぐ見る"
+    })
+  });
+
+  assert.equal(result.writerAudit.attempts[0].errorClass, "too_short");
 });
 
 test("ライタープロンプトに構造継承・コピー禁止・placement限定・印字禁止・被写体再解釈がある", () => {

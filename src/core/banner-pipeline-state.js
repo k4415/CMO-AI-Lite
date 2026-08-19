@@ -81,9 +81,9 @@ export function invalidatePipelineFrom(value, node) {
   return state;
 }
 
-export function reconcilePipelineState(value, expectedInputHashes = {}, currentOutputHashes = {}) {
+export function reconcilePipelineState(value, expectedInputHashes = {}, currentOutputHashes = {}, banner = null) {
   const state = normalizePipelineState(value);
-  const staleNode = findFirstInvalidPipelineNode(state, expectedInputHashes, currentOutputHashes);
+  const staleNode = findFirstInvalidPipelineNode(state, expectedInputHashes, currentOutputHashes, banner);
   if (!staleNode) return state;
   const invalidated = invalidatePipelineFrom(state, staleNode);
   const previous = state[staleNode];
@@ -101,17 +101,35 @@ export function reconcilePipelineState(value, expectedInputHashes = {}, currentO
 }
 
 export function nextPipelineNode(banner = {}, expectedInputHashes = {}, currentOutputHashes = {}) {
-  return findFirstInvalidPipelineNode(normalizePipelineState(banner.pipelineNodes), expectedInputHashes, currentOutputHashes);
+  return findFirstInvalidPipelineNode(
+    normalizePipelineState(banner.pipelineNodes),
+    expectedInputHashes,
+    currentOutputHashes,
+    banner
+  );
 }
 
-export function findFirstInvalidPipelineNode(state, expectedInputHashes = {}, currentOutputHashes = {}) {
+export function isWriterFallbackPendingRetry(banner = {}) {
+  if (!banner || typeof banner !== "object") return false;
+  return !clean(banner.writtenImagePrompt)
+    && banner.promptGenerationAudit?.writer?.fallback === true;
+}
+
+export function findFirstInvalidPipelineNode(state, expectedInputHashes = {}, currentOutputHashes = {}, banner = null) {
   return PIPELINE_NODE_ORDER.find((node) => (
-    state[node].status !== "completed"
-    || !state[node].inputHash
-    || state[node].inputHash !== clean(expectedInputHashes[node])
-    || !state[node].outputHash
-    || state[node].outputHash !== clean(currentOutputHashes[node])
+    isPipelineNodeStale(state, node, expectedInputHashes, currentOutputHashes, banner)
   )) || null;
+}
+
+function isPipelineNodeStale(state, node, expectedInputHashes, currentOutputHashes, banner) {
+  const nodeState = state[node];
+  if (nodeState.status !== "completed") return true;
+  if (!nodeState.inputHash) return true;
+  if (nodeState.inputHash !== clean(expectedInputHashes[node])) return true;
+  if (!nodeState.outputHash) return true;
+  if (nodeState.outputHash !== clean(currentOutputHashes[node])) return true;
+  if (node === "prompt" && isWriterFallbackPendingRetry(banner)) return true;
+  return false;
 }
 
 export function buildPipelineInputHashes(context = {}) {

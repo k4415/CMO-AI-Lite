@@ -162,3 +162,33 @@ test("ライター失敗時はwrittenImagePromptを空文字で返しnullやunde
   assert.equal(proposal.promptGenerationAudit.writer.fallback, true);
   assert.equal(proposal.promptGenerationAudit.writer.outcome, "failed");
 });
+
+test("ライターフォールバック時はreviewNotesに再試行案内を追記する", async () => {
+  const proposal = await generateBannerCreativeProposal({
+    banner: { id: "banner-1", imageSize: "1080x1080" },
+    product: { id: "product-1", name: "広告改善AI" },
+    strategy: { id: "strategy-1", benefit: "検証案を早く増やせる" },
+    template: closedTemplate,
+    copyBrief,
+    promptWriter: async () => ({
+      writtenImagePrompt: "",
+      styleNotes: "",
+      writerAudit: {
+        model: "claude-opus-5",
+        calls: 2,
+        outputChars: 0,
+        outcome: "failed",
+        fallback: true,
+        attempts: [
+          { attempt: 1, durationMs: 10, ok: false, errorClass: "api_error", outputChars: 0 },
+          { attempt: 2, durationMs: 12, ok: false, errorClass: "api_error", outputChars: 0 }
+        ]
+      }
+    })
+  });
+
+  assert.match(
+    proposal.reviewNotes,
+    /画像プロンプトライターが失敗したため旧方式プロンプトで生成（次回の画像生成時に自動再試行）/
+  );
+});

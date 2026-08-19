@@ -42,11 +42,18 @@ export async function writeBannerImagePrompt({
     expressionRules
   });
   const slotTexts = Array.isArray(copyBrief?.slotTexts) ? copyBrief.slotTexts : [];
-  const calls = [];
+  const attempts = [];
   let lastOutputChars = 0;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const startedAt = Date.now();
+    const attemptRecord = {
+      attempt,
+      durationMs: 0,
+      ok: false,
+      errorClass: "api_error",
+      outputChars: 0
+    };
     try {
       const parsed = await jsonGenerator({
         system: WRITER_SYSTEM,
@@ -58,41 +65,32 @@ export async function writeBannerImagePrompt({
       const rawPrompt = String(parsed?.writtenImagePrompt || "");
       const rawNotes = String(parsed?.styleNotes || "");
       lastOutputChars = rawPrompt.length + rawNotes.length;
+      attemptRecord.outputChars = lastOutputChars;
+      attemptRecord.durationMs = Date.now() - startedAt;
       if (!hasWriterHeaderContract(rawPrompt)) {
-        calls.push({
-          attempt,
-          model,
-          outputChars: lastOutputChars,
-          durationMs: Date.now() - startedAt,
-          ok: false
-        });
+        attemptRecord.errorClass = "header_missing";
+        attempts.push(attemptRecord);
         continue;
       }
-      calls.push({
-        attempt,
-        model,
-        outputChars: lastOutputChars,
-        durationMs: Date.now() - startedAt,
-        ok: true
-      });
       const writtenImagePrompt = sanitizeWriterText(rawPrompt, slotTexts);
       const styleNotes = sanitizeWriterText(rawNotes, slotTexts);
       if (effectiveCharCount(writtenImagePrompt) < MIN_PROSE_CHARS) {
+        attemptRecord.errorClass = "too_short";
+        attempts.push(attemptRecord);
         continue;
       }
+      attemptRecord.ok = true;
+      attemptRecord.errorClass = "";
+      attempts.push(attemptRecord);
       return {
         writtenImagePrompt,
         styleNotes,
-        writerAudit: buildWriterAudit({ model, calls, outputChars: lastOutputChars, fallback: false })
+        writerAudit: buildWriterAudit({ model, attempts, outputChars: lastOutputChars, fallback: false })
       };
-    } catch {
-      calls.push({
-        attempt,
-        model,
-        outputChars: 0,
-        durationMs: Date.now() - startedAt,
-        ok: false
-      });
+    } catch (error) {
+      attemptRecord.durationMs = Date.now() - startedAt;
+      attemptRecord.errorClass = classifyWriterError(error);
+      attempts.push(attemptRecord);
     }
   }
 
@@ -101,11 +99,23 @@ export async function writeBannerImagePrompt({
     styleNotes: "",
     writerAudit: buildWriterAudit({
       model,
-      calls,
+      attempts,
       outputChars: lastOutputChars,
       fallback: true
     })
   };
+}
+
+function classifyWriterError(error) {
+  const message = String(error?.message || error || "");
+  const name = String(error?.name || "");
+  if (name === "TimeoutError" || name === "AbortError" || /時間内に完了しなかった|timeout/i.test(message)) {
+    return "timeout";
+  }
+  if (/JSON形式ではありません|Unexpected token|JSON\.parse/i.test(message)) {
+    return "parse_error";
+  }
+  return "api_error";
 }
 
 function resolveWriterModel() {
@@ -113,14 +123,33 @@ function resolveWriterModel() {
   return configured || "claude-sonnet-5";
 }
 
-function buildWriterAudit({ model, calls, outputChars, fallback }) {
+function buildWriterAudit({ model, attempts, outputChars, fallback }) {
+  const normalizedAttempts = (Array.isArray(attempts) ? attempts : []).map((entry) => ({
+    attempt: entry.attempt,
+    durationMs: nonNegativeInteger(entry.durationMs),
+    ok: entry.ok === true,
+    errorClass: entry.ok === true ? "" : cleanErrorClass(entry.errorClass),
+    outputChars: nonNegativeInteger(entry.outputChars)
+  }));
   return {
     model,
-    calls: calls.length,
+    calls: normalizedAttempts.length,
     outputChars: Number(outputChars) || 0,
     outcome: fallback ? "failed" : "completed",
-    fallback
+    fallback,
+    attempts: normalizedAttempts
   };
+}
+
+function cleanErrorClass(value) {
+  const allowed = new Set(["timeout", "api_error", "parse_error", "header_missing", "too_short"]);
+  const text = String(value || "").trim();
+  return allowed.has(text) ? text : "api_error";
+}
+
+function nonNegativeInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : 0;
 }
 
 function hasWriterHeaderContract(rawText) {

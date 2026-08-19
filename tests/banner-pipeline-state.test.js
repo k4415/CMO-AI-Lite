@@ -225,3 +225,38 @@ test("画像生成失敗はimageから再開する", () => {
   assert.equal(restartNodeForPipelineError({ code: "PROMPT_CONTRACT_REFS_INVALID" }), "prompt");
   assert.equal(restartNodeForPipelineError({ code: "UNKNOWN" }), "prompt");
 });
+
+test("ライターフォールバックかつ散文空のときprompt nodeをstaleと判定する", () => {
+  const context = pipelineContext({
+    banner: {
+      writtenImagePrompt: "",
+      promptGenerationAudit: {
+        writer: { fallback: true, outcome: "failed", calls: 2 }
+      }
+    }
+  });
+  const expected = buildPipelineInputHashes(context);
+  const outputs = buildPipelineOutputHashes(context);
+  const state = completedState(expected, outputs);
+
+  assert.equal(nextPipelineNode({ ...context.banner, pipelineNodes: state }, expected, outputs), "prompt");
+  const reconciled = reconcilePipelineState(state, expected, outputs, context.banner);
+  assert.equal(reconciled.prompt.status, "pending");
+  assert.equal(reconciled.image.status, "pending");
+});
+
+test("散文が保存済みならwriter fallbackでもprompt nodeはstaleにならない", () => {
+  const context = pipelineContext({
+    banner: {
+      writtenImagePrompt: "視線順に沿った完成イメージの散文。".repeat(20),
+      promptGenerationAudit: {
+        writer: { fallback: true, outcome: "failed", calls: 2 }
+      }
+    }
+  });
+  const expected = buildPipelineInputHashes(context);
+  const outputs = buildPipelineOutputHashes(context);
+  const state = completedState(expected, outputs);
+
+  assert.equal(nextPipelineNode({ ...context.banner, pipelineNodes: state }, expected, outputs), null);
+});
