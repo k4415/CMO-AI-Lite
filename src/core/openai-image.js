@@ -131,7 +131,8 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
                 generatedImageHash: saved.generatedImageHash,
                 generatedImageModel: "gpt-image-2",
                 generatedImageSize: size,
-                imageGenerationAudit
+                imageGenerationAudit,
+                finalImagePrompt: prompt
               };
               return attemptId
                 ? completeBannerImageGeneration(projectRoot, banner.id, attemptId, patch)
@@ -155,7 +156,8 @@ export async function generateBannerImageWithGptImage2(projectRoot, banner, cont
         generatedImageHash: saved.generatedImageHash,
         generatedImageModel: "gpt-image-2",
         generatedImageSize: size,
-        imageGenerationAudit
+        imageGenerationAudit,
+        finalImagePrompt: prompt
       };
       return attemptId
         ? completeBannerImageGeneration(projectRoot, banner.id, attemptId, patch)
@@ -221,6 +223,7 @@ function buildImageAttemptAudit({ generationAttempt, quality, prompt, startedAt,
     attempt: generationAttempt,
     quality,
     requestId,
+    sentPrompt: prompt,
     promptHash: `sha256:${crypto.createHash("sha256").update(prompt).digest("hex")}`,
     promptLength: prompt.length,
     startedAt: startedAt.toISOString(),
@@ -247,8 +250,29 @@ function buildImageAttemptAudit({ generationAttempt, quality, prompt, startedAt,
   };
 }
 
+function resolveLatestSentImagePrompt(imageGenerationAudit) {
+  const attempts = Array.isArray(imageGenerationAudit?.attempts) ? imageGenerationAudit.attempts : [];
+  const selectedAttempt = Number(imageGenerationAudit?.selectedAttempt);
+  if (Number.isFinite(selectedAttempt) && selectedAttempt > 0) {
+    const selected = attempts.find((item) => item.attempt === selectedAttempt);
+    if (cleanSentPrompt(selected?.sentPrompt)) return cleanSentPrompt(selected.sentPrompt);
+  }
+  for (let index = attempts.length - 1; index >= 0; index -= 1) {
+    const sentPrompt = cleanSentPrompt(attempts[index]?.sentPrompt);
+    if (sentPrompt) return sentPrompt;
+  }
+  return "";
+}
+
+function cleanSentPrompt(value) {
+  return String(value || "").trim();
+}
+
 async function persistImageGenerationFailure(projectRoot, banner, attemptId, error, imageGenerationAudit) {
-  const patch = { imageGenerationAudit };
+  const patch = {
+    imageGenerationAudit,
+    finalImagePrompt: resolveLatestSentImagePrompt(imageGenerationAudit)
+  };
   if (attemptId) {
     return failBannerImageGeneration(projectRoot, banner.id, attemptId, error.message, patch);
   }

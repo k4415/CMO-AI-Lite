@@ -13,6 +13,7 @@
   → WHO-WHAT戦略
   → バナー画像テンプレ + 追加指示
   → copyBrief + promptJson
+  → デザイン散文（W契約）
   → gpt-image-2
 ```
 
@@ -22,7 +23,7 @@
 - システムプロンプトの正は `config/prompts/*.md`(単一ソース)。エージェントが独自にプロンプトを組んで直接ファイルを書くことは禁止。
 - AI実行には2つのモードがある。
   - **サブスク実行モード(エージェントの既定)**: `config/prompts/*.md` を読み、該当AIモジュールの `build*Prompt` と同じ入力を自分で集めて、Claude Code / Codex 自身のモデルで同じ出力JSONスキーマを作る。結果は既存のCRUD APIで保存し、テキストは保存前に `POST /api/regulations/apply` でNG表現を置換する。
-  - **API実行モード**: サーバー側の生成API(`*/generate*`, `*/extract-ai` など)を使う。UIからの操作は常にこちら。バナー制作では Stage 1 copyplan が Anthropic (`claude-opus-4-8`)、Stage 2 と画像生成が OpenAI 系。
+  - **API実行モード**: サーバー側の生成API(`*/generate*`, `*/extract-ai` など)を使う。UIからの操作は常にこちら。バナー制作では Stage 1 copyplan が Anthropic (`claude-opus-4-8`)、Stage 2b ライターが Anthropic `claude-sonnet-5`（`CMOAI_PROMPT_WRITER_MODEL`で可変）、Stage 2 と画像生成が OpenAI 系。
 - 画像生成は常に `POST /api/banners/generate-image`(`gpt-image-2` 固定、OpenAI課金)。
 
 ## エージェントスキル（4体）
@@ -31,7 +32,7 @@
 | --- | --- |
 | `cmoai-research` | 商品登録・内部LP解析・事実抽出 |
 | `cmoai-who-what` | WHO-WHAT戦略提案 |
-| `cmoai-banner` | バナー案・copyBrief・promptJson・画像生成 |
+| `cmoai-banner` | バナー案・copyBrief・promptJson・デザイン散文・画像生成 |
 | `cmoai-template` | バナー画像テンプレ化 |
 
 `.claude/skills/` と `.agents/skills/` は同一内容。
@@ -107,7 +108,7 @@ GET  /api/ad-templates/template-image/status?templateIds={templateId}
 
 サブスク実行モードでバナーを作る場合、生成素材は**選択WHO-WHAT・広告テンプレ・追加指示原文**に限定する。**事実DBは読まない。**
 
-Preflight → Stage 1(copyBrief / Anthropic) → Stage 2(promptJson / OpenAI) → 画像生成(gpt-image-2 / OpenAI) の順。詳細は `.claude/skills/cmoai-banner/SKILL.md` を参照。
+Preflight → Stage 1(copyBrief / Anthropic) → Stage 2(promptJson / OpenAI) → Stage 2b(デザイン散文 / Anthropic) → 画像生成(gpt-image-2 / OpenAI) の順。サブスク実行モードでは Stage 2b もエージェント自身が担当する。`writtenImagePrompt`/`styleNotes` が空だと画像生成は旧式プロンプトにフォールバックする。詳細は `.claude/skills/cmoai-banner/SKILL.md` を参照。
 
 配色は`追加指示・修正指示 > 表現レギュレーション／正式ブランド指定 > 保存済みWHO-WHAT colorInference > テンプレカラー > safe default`の順にフィールド単位で決定する。既存WHO-WHATに`colorInference`がなければ`insufficient`としてテンプレへフォールバックし、バナー生成中にカラー専用AIを追加しない。選択ロゴ・商品画像・その他画像は原本色を維持する。
 

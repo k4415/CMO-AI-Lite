@@ -1449,6 +1449,24 @@ body.resizingDetailPane { cursor: col-resize; user-select: none; }
 .detailRawInfo summary::before { content: "▸ "; }
 .detailRawInfo[open] summary::before { content: "▾ "; }
 .detailRawInfo .detailModalGrid { padding: 0 12px 12px; }
+.outputReviewCollapsible { margin: 0; }
+.outputReviewCollapsible pre {
+  max-height: 260px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.outputReviewCollapsible.tall pre { max-height: 460px; }
+.outputReviewCollapsible.readable pre { font-family: inherit; font-size: 13px; line-height: 1.7; }
+.bannerPromptPendingNote { padding: 12px; margin: 0; }
 
 .detailBlock { margin-top: 18px; }
 .detailBlock h3 { margin: 0 0 8px; color: var(--text-secondary); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }

@@ -16,25 +16,27 @@ CMO AI Lite のバナー制作スキル。詳細な API・データ配置・選�
   → WHO-WHAT戦略
   → バナー画像テンプレ + 追加指示
   → copyBrief + promptJson
+  → デザイン散文（W契約）
   → gpt-image-2
 ```
 
-このスキルは「WHO-WHAT戦略 → バナー画像テンプレ + 追加指示 → copyBrief + promptJson → gpt-image-2」を担当する。**事実DBは読み込まない。**
+このスキルは「WHO-WHAT戦略 → バナー画像テンプレ + 追加指示 → copyBrief + promptJson → デザイン散文（W契約） → gpt-image-2」を担当する。**事実DBは読み込まない。**
 
 ## 実行モード
 
-- バナー生成は copyBrief と画像生成プロンプト(imageText/promptJson/promptText)を作る。
-- **サブスク実行モード(エージェントの既定)**: バナー案のテキスト生成は、OpenAI課金を使わず自分(Claude Code / Codex)のモデルで行う。Preflightと2ステージで実行する。
+- バナー生成は copyBrief、画像生成プロンプト(imageText/promptJson/promptText)、デザイン散文(writtenImagePrompt/styleNotes)を作る。
+- **サブスク実行モード(エージェントの既定)**: バナー案のテキスト生成は、OpenAI課金を使わず自分(Claude Code / Codex)のモデルで行う。PreflightとStage 1/2/2bで実行する。
   - Preflight: `config/prompts/banner-hypothesis.md` を読み、同じstrategy・template・追加指示を使う兄弟案ごとに `sharedContract`、`baselineCandidate`、`candidatePatches` を作る。共通項目はコード側の契約どおり固定し、各bannerへ完全形の `creativeHypothesis` を保存してからcopyBriefを作る。完全形仮説を3件別々に作ることは禁止する。一時的な `HypothesisGroupPlan` 自体は保存しない。
   - Stage 1: テンプレの `copyBlueprint` / `templateZones[].elements[]` から `copySlotPlan`（slotId、役割、canonicalField、charBudget）を作る。`config/prompts/banner-copy.md` を読み、選択WHO-WHAT、カテゴリ距離に応じたテンプレ参照、既出コピー、追加指示原文から `slotTexts` 付き `copyBrief` を作る。第1案はテンプレ文面構造ベースの baseline、第2案以降は baseline variation とし、事実DBは読まず、選択WHO-WHAT外の機能・用途・根拠は混ぜない。`near` は心理メカニズムだけ、`far` は抽象化済みpatternまで使う。
-  - Stage 2: `config/prompts/banner.md` を読み、確定済み `copyBrief.slotTexts` を変更せず、slotId対応で `imageText`, `selectionReason`, `promptJson`(basic/globalDesign/colorScheme/structureSheet/zones/referenceImage/negativeRules/reviewChecklist を含む), `promptText`, `reviewNotes` を作る。
+  - Stage 2: `config/prompts/banner.md` を読み、確定済み `copyBrief.slotTexts` を変更せず、slotId対応で `imageText`, `selectionReason`, `promptJson`(basic/globalDesign/colorScheme/structureSheet/zones/referenceImage/negativeRules/reviewChecklist を含む), `promptText`, `reviewNotes` を作る。閉テンプレのpromptJson zonesにはname・background描写（backgroundStyle）・font・画像枠の元描写前置を含め、globalDesignにcolorPolicyを含める（`compileClosedTemplatePromptSeed`の出力形に合わせる）。
+  - Stage 2b: `config/prompts/banner-image-prompt-writer.md` を読み、Stage 2で確定した promptJson・colorDecision・copyBrief（slotTextsは参照のみ）から `writtenImagePrompt` と `styleNotes` を自分のモデルで書く。W契約: (a)先頭3非空行が「形式：」「目的・戦略：」「スタイル・トーン：」で始まる (b)slotTextsの文言を散文に書かない (c)確定パレットの色の使い分け（濃色・誘目色・背景）と選定理由を1文含める。トーンはカテゴリが売る感情に合わせる (d)200字以上。保存前に4点を自己検証する。
   1. まず `POST /api/banners` でバナー行を作成する(productId/strategyId必須。テンプレや商品画像/ロゴのpathも通常どおり設定)。
   2. Preflightの完全形 `creativeHypothesis` と `approvedClaimSnapshot`、`generationRunId`、`candidateGroupId`、`candidateIndex` を各bannerへ保存する。部分再実行では同じcandidateGroupIdの正常な保存済み兄弟案をgroup seedにし、失敗したbannerIdのcandidate patchだけを作る。基準兄弟案の仮説・copyBrief・pipeline hash・画像は再保存しない。
   3. Stage 1の `copyBrief` を `PATCH /api/banners/{id}` に `{"project":"...","patch":{"copyBrief":...}}` の形で保存する(**patchでネストしないと無視される**)。`slotTexts` を単一の正にし、mainHook/subHook/proof/offerBadge/cta/disclaimerはslotTextsから導出した値に同期する。
-  4. Stage 2で生成したJSON全体を `POST /api/regulations/apply` に通す。`additionalInstruction` も同APIへ渡し、競合時は追加指示を優先する。
-  5. 置換後の内容を `PATCH /api/banners/{id}` に保存する。`copyBrief`, `imageText`, `promptJson`, `promptText`, `colorDecision`, `reviewNotes`, `selectionReason` に加えて `productionStatus: "prompt_ready"` を設定する(既存の `generate-prompt` API が生成成功時に設定するのと同じステータス)。失敗した場合は `productionStatus: "failed"` と `lastError` を設定する。
+  4. Stage 2のJSONと Stage 2bの `writtenImagePrompt`/`styleNotes` を `POST /api/regulations/apply` に通す。`additionalInstruction` も同APIへ渡し、競合時は追加指示を優先する。
+  5. 置換後の内容を `PATCH /api/banners/{id}` に保存する。`copyBrief`, `imageText`, `promptJson`, `promptText`, `writtenImagePrompt`, `styleNotes`, `colorDecision`, `reviewNotes`, `selectionReason` に加えて `productionStatus: "prompt_ready"` を設定する。**`writtenImagePrompt`/`styleNotes`が空だと画像生成が旧式プロンプトにフォールバックする。** 失敗した場合は `productionStatus: "failed"` と `lastError` を設定する。
   6. 拡散(`spread`)・修正(`revise`)も同じ考え方で、複数バナー行への展開や再生成分をサブスク実行モードで作れる。ただし手順や横展開の軸出しは既存APIの挙動(戦略軸5案など)を踏襲する。
-- **API実行モード**: `POST /api/banners/generate-prompt`、`POST /api/banners/spread`、`POST /api/banners/revise` を使う。サーバー内では Stage 1 copyplan が Anthropic (`claude-opus-4-8`)、Stage 2 と画像生成が OpenAI 系。ユーザーが「UIと同じで」と言ったとき、またはサブスク実行が難しいときに使う。
+- **API実行モード**: `POST /api/banners/generate-prompt`、`POST /api/banners/spread`、`POST /api/banners/revise` を使う。サーバー内では Stage 1 copyplan が Anthropic (`claude-opus-4-8`)、Stage 2b ライターは Anthropic `claude-sonnet-5`（`CMOAI_PROMPT_WRITER_MODEL`で可変）、Stage 2 と画像生成が OpenAI 系。ユーザーが「UIと同じで」と言ったとき、またはサブスク実行が難しいときに使う。
 - **画像生成は常に** `POST /api/banners/generate-image`(gpt-image-2固定・OpenAI課金)。サブスク実行モードでも画像生成だけはこのAPIを呼ぶ。
 
 ## 手順
@@ -50,7 +52,7 @@ CMO AI Lite のバナー制作スキル。詳細な API・データ配置・選�
    - 画像が1枚もない場合は「商品画像なしで生成するか、画像を登録するか」を確認する(なしでも生成は可能)。
    - `brandTone` はトーン制約として使う。配色は「追加指示・修正指示 > 表現レギュレーション/正式ブランド指定 > 保存済みWHO-WHAT colorInference > テンプレカラー > safe default」の順でフィールド単位に決める。既存WHO-WHATが`colorInference`未設定なら`insufficient`としてテンプレへフォールバックし、バナー生成中にカラー専用AIを追加しない。選択素材は原本色を維持する。
 5. **生成**: サーバー(localhost:5173)が未起動なら `npm run dev` をバックグラウンドで起動してから、上記「実行モード」に従う。
-  - 既定(サブスク実行): `POST /api/banners` で行を作成 → Preflightで共通契約と差分を合成しcreativeHypothesisを保存 → Stage 1でcopyBrief生成・保存 → Stage 2で画像prompt生成 → `POST /api/regulations/apply` → `PATCH /api/banners/{id}` で保存(prompt_ready)
+  - 既定(サブスク実行): `POST /api/banners` で行を作成 → Preflightで共通契約と差分を合成しcreativeHypothesisを保存 → Stage 1でcopyBrief生成・保存 → Stage 2でpromptJson生成 → Stage 2bでデザイン散文生成 → `POST /api/regulations/apply` → `PATCH /api/banners/{id}` で保存(prompt_ready)
    - API実行モード指定時: `POST /api/banners/generate-prompt`
    - 画像は常に `POST /api/banners/generate-image`(gpt-image-2)
    - 複数案の指示(「10案」等)は、戦略軸5案の横展開と、テンプレ/WHO-WHATを変えた追加行の組み合わせで満たす。件数と使ったテンプレを報告する。
@@ -62,6 +64,7 @@ CMO AI Lite のバナー制作スキル。詳細な API・データ配置・選�
 
 - API エラーの日本語メッセージは略さず報告する(APIキー未設定など)。
 - 表現レギュレーション(`data/expression-rules.json`)はサーバー側で自動適用される。置換が入った場合は reviewNotes に記録されるので、あれば報告する。
+- Stage 2b（ライター）が失敗したバナーは旧式JSONダンププロンプトで画像が完成し、reviewNotesに明示される。次回の画像生成で自動再試行される。
 - 画像生成後はOCRによる `copyIntegrityCheck` を確認する。不一致・未確認は警告付き完成(`completed_with_warnings`)として報告する。
 - 仮説差別化だけが2回目も弱い案は `creativeHypothesis.variationReview.continuedAfterReview=true` を保存して画像生成まで続けるが、完成後は目視確認を促す。
 - テンプレの表示名・ゾーン表示名・見本コピー・自然言語内の元テンプレ固有色は仮説、コピー、画像の生成入力へ渡さない。`templateColorScheme`の有効色だけは上位3ソースがないフィールドのfallback候補にできる。
