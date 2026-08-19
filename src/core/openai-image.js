@@ -745,9 +745,11 @@ export function buildBannerImageEditForm({ prompt, size, inputImages, quality = 
   return form;
 }
 
+const BANNER_IMAGE_QUALITY_ALLOWED = new Set(["low", "medium", "high", "auto", "standard"]);
+
 export function resolveBannerImageQuality(value = process.env.CMOAI_BANNER_IMAGE_QUALITY) {
   const normalized = String(value || "").trim().toLowerCase();
-  return normalized === "medium" ? "medium" : "low";
+  return BANNER_IMAGE_QUALITY_ALLOWED.has(normalized) ? normalized : "medium";
 }
 
 function mimeFor(filePath) {
