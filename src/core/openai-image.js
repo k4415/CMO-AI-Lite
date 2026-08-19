@@ -832,49 +832,101 @@ function buildBannerImagePromptContext(banner, inputImages) {
 
 function assembleWrittenBannerImagePrompt(banner, context, writtenImagePrompt) {
   const { json, basic, inputImages, templateStructureInstruction, selectedAssetPlacements, finalLogoInstruction, imageText } = context;
-  const head = [
-    "日本語のダイレクト広告バナーを制作してください。",
-    "モデルはgpt-image-2を使用しています。",
-    templateStructureInstruction,
-    buildAttachedImageInstruction(inputImages, json.templateStructureContract, selectedAssetPlacements),
-    "画像内テキストは後処理で合成せず、画像生成時点で自然に配置してください。",
-    "ただし日本語は読みやすさを最優先し、文字化け、崩れ、重なり、切れを避けてください。"
-  ].filter(Boolean).join("\n");
   const size = "基本仕様: " + (basic.size || basic.aspectRatio || banner.imageSize || "1024x1024");
+  const basicInstructions = [
+    "日本語のダイレクト広告バナーを制作してください。",
+    "画像内テキストは後処理で合成せず、画像生成時点で自然に配置してください。ただし日本語は読みやすさを最優先し、文字化け、崩れ、重なり、切れを避けてください。"
+  ].join("\n");
   const copyBlock = ["バナー内テキスト:", imageText].filter(Boolean).join("\n");
   const colorBlock = formatWrittenBrandColorBoundary(json.colorScheme);
-  const tail = [
+  const contractBlock = buildWrittenPromptContractBlock({
+    json,
+    inputImages,
+    templateStructureInstruction,
+    selectedAssetPlacements,
+    finalLogoInstruction
+  });
+  const deterministic = [size, basicInstructions, copyBlock, colorBlock, contractBlock].filter(Boolean).join("\n");
+  const remaining = BANNER_IMAGE_PROMPT_BUDGET - deterministic.length - 1;
+  if (remaining <= 0) return "";
+  const clipped = clipWriterDesignBlocks(writtenImagePrompt, banner.styleNotes, remaining);
+  return [clipped, size, basicInstructions, copyBlock, colorBlock, contractBlock].filter(Boolean).join("\n");
+}
+
+function buildWrittenPromptContractBlock({ json, inputImages, templateStructureInstruction, selectedAssetPlacements, finalLogoInstruction }) {
+  return [
+    templateStructureInstruction,
+    buildWrittenAssetContractSection(inputImages, json.templateStructureContract, selectedAssetPlacements),
     "【最終優先・確定コピー】画像内に描く文字は「バナー内テキスト」に列挙した行だけに限定する。空欄text slotを推測で補完しない。テンプレのpurpose・role・見本も文字の根拠にしない。列挙されていない注釈、限定、終了、CTA、商品名を追加しない。",
     "最終品質条件: 余白を確保し、視線誘導を明確にし、CTAを読みやすく目立たせる。効果保証や医療的治療断定は避ける。",
     finalLogoInstruction,
     json.additionalInstruction ? "【追加指示原文・既存要素内で反映】" + json.additionalInstruction : "",
-    json.templateStructureContract?.closed ? "【最終優先・構造再確認】追加指示は既存elementの色・書体・余白・内容表現の範囲で反映し、契約にない線・下線・カード・バッジ・画像・装飾を増やさない。" : "",
-    buildFinalSelectedAssetInstruction(inputImages, selectedAssetPlacements)
+    json.templateStructureContract?.closed ? "【最終優先・構造再確認】追加指示は既存elementの色・書体・余白・内容表現の範囲で反映し、契約にない線・下線・カード・バッジ・画像・装飾を増やさない。" : ""
   ].filter(Boolean).join("\n");
-  const deterministic = [head, size, copyBlock, colorBlock, tail].filter(Boolean).join("\n");
-  const remaining = BANNER_IMAGE_PROMPT_BUDGET - deterministic.length - 1;
-  if (remaining <= 0) return "";
-  const clipped = clipWriterDesignBlocks(writtenImagePrompt, banner.styleNotes, remaining);
-  return [head, size, clipped, copyBlock, colorBlock, tail].filter(Boolean).join("\n");
+}
+
+function buildWrittenAssetContractSection(inputImages, templateStructureContract = null, placements = []) {
+  if (!Array.isArray(inputImages) || !inputImages.length) return "";
+  const selectedAssetPolicy = buildSelectedAssetOverridePolicyFromInputImages(inputImages);
+  const placementByOrdinal = new Map((Array.isArray(placements) ? placements : []).map((placement) => [Number(placement.ordinal), placement]));
+  const placementTargets = (Array.isArray(placements) ? placements : []).map((placement) => (
+    `attached image ${placement.ordinal} -> image slot ${placement.slotId} only`
+  )).join("; ");
+  const rows = inputImages.map((image) => {
+    const ordinal = Number(image.ordinal || inputImages.indexOf(image) + 1);
+    const position = `${ordinal}枚目（${image.fileName || path.basename(image.path || "image")}）`;
+    const placement = placementByOrdinal.get(ordinal);
+    const placementText = placement ? ` slot ${placement.slotId} only.` : "";
+    if (image.role === "brand-logo") {
+      const officialWordmark = logoWordmarkForInput(image);
+      const wordmark = officialWordmark ? ` 正式ワードマーク「${officialWordmark}」を1文字も変更せず、添付原本を使う。` : "";
+      return `- ${position}: 正式ブランドロゴ。判読できる大きさで1回表示。${wordmark}`;
+    }
+    if (image.role === "product") return `- ${position}: ユーザー選択商品素材。カテゴリ推測禁止。${placementText}`;
+    return `- ${position}: 選択参考素材。原画像を1回だけ使用。${placementText}`;
+  });
+  const fallbackLogoElements = selectedLogoFallbackElements(
+    templateStructureContract,
+    inputImages.filter((image) => image.role === "brand-logo").length
+  );
+  const fallbackLogoInstructions = fallbackLogoElements.map((element) => (
+    `- ${element.slotId}: 選択ロゴを top ${element.position.top} / left ${element.position.left} / width 29% / height 12% へ配置。`
+  ));
+  const hasLogo = inputImages.some((image) => image.role === "brand-logo");
+  const logoWords = inputImages.filter((image) => image.role === "brand-logo").map(logoWordmarkForInput).filter(Boolean);
+  return [
+    selectedAssetPolicy?.enabled
+      ? "【添付画像・選択素材契約】ユーザー選択素材は閉じた構造の唯一の例外。各素材を原画像のまま完成画像内で1回だけ使い、描き直し・立体化・パッケージ化・カード化・複製・派生を禁止する。選択外のロゴ・商品・参考素材は追加しない。"
+      : "【添付画像・選択素材契約】",
+    "各素材は原画像全体を平面のまま1回だけ使い、ボトル・箱・容器・パッケージ・モックアップへ変換しない。",
+    placementTargets ? `Exclusive placement map: ${placementTargets}. All other image slots must not contain, imitate, or derive these attached assets.` : "",
+    ...rows,
+    ...fallbackLogoInstructions,
+    hasLogo
+      ? (templateStructureContract?.closed
+        ? "ロゴ必須: 既存logo image枠を優先。枠がなくても選択ロゴを省略しない。"
+        : "ロゴ必須: 装飾よりロゴの忠実表示を優先する。")
+      : "",
+    logoWords.length ? `正式ワードマーク: ${logoWords.join(" / ")}。カテゴリ置換・追記禁止。末尾へ「FC」を追加しない。` : ""
+  ].filter(Boolean).join("\n");
 }
 
 function clipWriterDesignBlocks(writtenImagePrompt, styleNotes, remaining) {
   let prose = String(writtenImagePrompt || "").trim();
   let notes = String(styleNotes || "").trim();
   if (prose.length > WRITTEN_IMAGE_PROMPT_CAP) prose = prose.slice(0, WRITTEN_IMAGE_PROMPT_CAP);
-  const proseLabel = "【デザイン完成イメージ】\n";
-  const notesLabel = "\nデザイン意図:\n";
-  const designLength = () => proseLabel.length + prose.length + (notes ? notesLabel.length + notes.length : 0);
+  const notesLabel = notes ? "\nデザイン意図:\n" : "";
+  const designLength = () => prose.length + (notes ? notesLabel.length + notes.length : 0);
   if (designLength() > remaining) {
-    const notesBudget = remaining - proseLabel.length - prose.length - notesLabel.length;
+    const notesBudget = remaining - prose.length - notesLabel.length;
     notes = notesBudget > 0 ? notes.slice(0, notesBudget) : "";
   }
   if (designLength() > remaining) {
-    const proseBudget = remaining - proseLabel.length - (notes ? notesLabel.length + notes.length : 0);
+    const proseBudget = remaining - (notes ? notesLabel.length + notes.length : 0);
     prose = proseBudget > 0 ? prose.slice(0, proseBudget) : "";
   }
   return [
-    proseLabel + prose,
+    prose,
     notes ? `デザイン意図:\n${notes}` : ""
   ].filter(Boolean).join("\n");
 }

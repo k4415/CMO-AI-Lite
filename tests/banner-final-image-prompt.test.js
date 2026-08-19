@@ -25,7 +25,12 @@ test("画像生成時にsentPromptとfinalImagePromptを保存し再読込でき
     else process.env.OPENAI_API_KEY = originalKey;
   });
 
-  const prose = "視線は上部から入り、斜めの帯が商品ゾーンへ誘導する。".repeat(8);
+  const prose = [
+    "形式：1024x1024の正方形広告バナー。",
+    "目的・戦略：固定コピーを一瞬で伝える。",
+    "スタイル・トーン：視線誘導を明確にする。",
+    "視線は上部から入り、斜めの帯が商品ゾーンへ誘導する。".repeat(8)
+  ].join("\n");
   const created = await addBannerCreative(projectRoot, { productId: "p1", strategyId: "s1", title: "final prompt" });
   const banner = await updateBannerCreative(projectRoot, created.id, {
     imageText: "固定コピーA\n固定コピーB",
@@ -52,7 +57,8 @@ test("画像生成時にsentPromptとfinalImagePromptを保存し再読込でき
   const [stored] = await listBannerCreatives(projectRoot);
 
   assert.ok(sentPrompt.length > 0);
-  assert.match(sentPrompt, /【デザイン完成イメージ】/);
+  assert.match(sentPrompt, /^形式：/);
+  assert.doesNotMatch(sentPrompt, /【デザイン完成イメージ】/);
   assert.doesNotMatch(sentPrompt, /legacy preview prompt/);
   assert.equal(stored.finalImagePrompt, sentPrompt);
   assert.equal(stored.imageGenerationAudit.attempts.length, 1);

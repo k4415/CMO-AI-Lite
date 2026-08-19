@@ -7,7 +7,12 @@ import {
   buildBannerLogoRecoveryPrompt
 } from "../src/core/openai-image.js";
 
-const SAMPLE_PROSE = "視線は上部から入り、斜めの帯が商品ゾーンへ誘導する。独立したオーバーレイ文字だけを使う。木目のテーブルと朝の側光で質感を出す。";
+const SAMPLE_PROSE = [
+  "形式：1080x1080の正方形広告バナー。",
+  "目的・戦略：朝の贈答シーンで便益を一瞬で伝える。",
+  "スタイル・トーン：木目と側光で上質な和菓子感。",
+  "視線は上部から入り、斜めの帯が商品ゾーンへ誘導する。独立したオーバーレイ文字だけを使う。木目のテーブルと朝の側光で質感を出す。"
+].join("\n");
 const LONG_PROSE = SAMPLE_PROSE.repeat(400);
 const COPY_LINE = "今朝届く贈答だけを描く";
 const PALETTE = { main: "#7A1F1F", sub: "#F7E7C6", accent: "#C45C26", background: "#FFF8EE" };
@@ -43,9 +48,9 @@ function bannerWithProse(overrides = {}) {
 
 const productInput = [{ role: "product", ordinal: 1, fileName: "01-product-icon.png", path: "assets/icon.png" }];
 
-test("writtenImagePromptがある初回組み立ては散文と決定論ガードを併用する", () => {
+test("writtenImagePromptがある初回組み立ては散文先頭と末尾契約を併用する", () => {
   const prompt = buildBannerImagePrompt(bannerWithProse(), productInput);
-  assert.match(prompt, /【デザイン完成イメージ】/);
+  assert.match(prompt, /^形式：/);
   assert.match(prompt, /デザイン意図/);
   assert.match(prompt, /バナー内テキスト:/);
   assert.match(prompt, new RegExp(COPY_LINE));
@@ -53,6 +58,10 @@ test("writtenImagePromptがある初回組み立ては散文と決定論ガー�
   assert.match(prompt, /Exclusive placement map/);
   assert.match(prompt, /#7A1F1F/);
   assert.doesNotMatch(prompt, /legacy-json-dump-marker/);
+  assert.doesNotMatch(prompt, /【デザイン完成イメージ】/);
+  assert.ok(prompt.indexOf("形式：") < prompt.indexOf("日本語のダイレクト広告バナー"));
+  assert.ok(prompt.indexOf("【最終優先・確定コピー】") > prompt.indexOf("ブランドカラー"));
+  assert.ok(prompt.indexOf("【最優先・閉じた構造契約】") > prompt.indexOf("ブランドカラー"));
 });
 
 test("空のwrittenImagePromptは現行のJSONダンプ組み立てへフォールバックする", () => {
@@ -68,7 +77,7 @@ test("12,000文字clip後も確定コピー・placement map・配色が完全に
     styleNotes: "い".repeat(3000)
   }), productInput);
 
-  assert.match(prompt, /【デザイン完成イメージ】/);
+  assert.match(prompt, /^あ/);
   assert.match(prompt, /あ{100}/);
   assert.ok(prompt.length <= 12000, `prompt length ${prompt.length}`);
   assert.match(prompt, /【最終優先・確定コピー】/);
@@ -98,8 +107,9 @@ test("通常リカバリは短縮構造を維持し、散文アセンブリを�
   const main = buildBannerImagePrompt(bannerWithProse(), productInput);
   assert.match(recovery, /再生成専用/);
   assert.doesNotMatch(recovery, /【デザイン完成イメージ】/);
+  assert.doesNotMatch(recovery, /^形式：/m);
+  assert.match(main, /^形式：/);
   assert.ok(recovery.length < 6000);
-  assert.ok(recovery.length < main.length);
 });
 
 test("ロゴリカバリは特化構造を維持し、散文アセンブリを使わない", () => {
