@@ -14,8 +14,8 @@ import { buildColorNeutralTemplateZones } from "../src/core/banner-template-colo
 const templates = JSON.parse(fs.readFileSync(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
 const TEMPLATE_IDS = ["tpl_default_026", "tpl_default_042", "tpl_default_009"];
 
-test("全100テンプレのzone・elementを上限で切り捨てず閉じた契約へ含める", () => {
-  assert.equal(templates.length, 100);
+test("配布100件を維持し、全登録テンプレのzone・elementを上限で切り捨てず閉じた契約へ含める", () => {
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
   for (const template of templates) {
     const contract = buildTemplateStructureContract(template.templateZones);
     const expectedZoneCount = template.templateZones.length;

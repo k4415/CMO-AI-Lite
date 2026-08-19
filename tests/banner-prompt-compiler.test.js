@@ -183,7 +183,7 @@ test("決定論的compilerは具体色を決めず、色中立のshape構造だ�
 
 test("全配布テンプレを決定論的compileしてもzone・element・type数を変えない", async () => {
   const templates = JSON.parse(await fs.readFile(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
-  assert.equal(templates.length, 100);
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
 
   for (const template of templates) {
     const expected = buildTemplateStructureContract(template.templateZones);

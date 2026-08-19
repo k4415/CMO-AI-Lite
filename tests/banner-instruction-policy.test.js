@@ -128,3 +128,32 @@ test("updating additionalInstruction snapshots copy before invalidation", async 
   assert.equal(updated.communicationReview.exemption, "explicit_copy_lock");
   assert.equal(updated.copyQualityReview.rewriteAllowed, false);
 });
+
+test("revisionInstructionのコピー変更はcopyplanから無効化する", async (t) => {
+  const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-banner-revision-policy-"));
+  t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
+  await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
+  const created = await addBannerCreative(projectRoot, {
+    productId: "prod_1",
+    strategyId: "strategy_1",
+    title: "コピー修正テスト"
+  });
+  await updateBannerCreative(projectRoot, created.id, {
+    copyBrief: { mainHook: "修正前コピー" },
+    imageText: "修正前コピー",
+    promptJson: { zones: [] },
+    generatedImagePath: "outputs/banners/test.png"
+  });
+
+  const updated = await updateBannerCreative(projectRoot, created.id, {
+    revisionInstruction: "主見出しを『修正後コピー』に変更してください"
+  });
+
+  assert.equal(updated.copyBrief, null);
+  assert.equal(updated.imageText, "");
+  assert.equal(updated.promptJson, null);
+  assert.equal(updated.generatedImagePath, "");
+  assert.equal(updated.pipelineNodes.copyplan.status, "pending");
+  assert.equal(updated.productionStatus, "not_started");
+  assert.equal(updated.imageGenerationStatus, "not_started");
+});

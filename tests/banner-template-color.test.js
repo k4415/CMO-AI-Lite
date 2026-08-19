@@ -125,9 +125,9 @@ test("解決済みpalette外のHEXと色名を監査で検出する", () => {
   assert.deepEqual(review.unexpectedNamedColorPaths, ["globalDesign.style"]);
 });
 
-test("全100テンプレで色中立化と再バインドが構造を変えない", async () => {
+test("配布100件を維持し、全登録テンプレで色中立化と再バインドが構造を変えない", async () => {
   const templates = JSON.parse(await fs.readFile(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
-  assert.equal(templates.length, 100);
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
 
   for (const template of templates) {
     const originalZones = Array.isArray(template.templateZones) ? template.templateZones : [];

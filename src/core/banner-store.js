@@ -851,7 +851,7 @@ export async function updateBannerCreative(projectRoot, bannerId, patch) {
       const revisionPolicy = buildInstructionPolicy(normalizedPatch.revisionInstruction);
       const copyProtectedVisualEdit = revisionPolicy.protectedFields.includes("copyBrief")
         && revisionPolicy.editableFields.includes("imageElements");
-      invalidateFrom = earlierPipelineNode(invalidateFrom, revisionPolicy.changeScope === "visual_only" || copyProtectedVisualEdit ? "prompt" : "copy");
+      invalidateFrom = earlierPipelineNode(invalidateFrom, revisionPolicy.changeScope === "visual_only" || copyProtectedVisualEdit ? "prompt" : "copyplan");
     }
     const nextInstruction = [
       Object.prototype.hasOwnProperty.call(normalizedPatch, "additionalInstruction") ? normalizedPatch.additionalInstruction : current.additionalInstruction,
