@@ -251,7 +251,7 @@ test("選択ロゴの原画像をgpt-image-2のimage[]へ直接添付する", as
   const images = form.getAll("image[]");
 
   assert.equal(form.get("model"), "gpt-image-2");
-  assert.equal(form.get("quality"), "low");
+  assert.equal(form.get("quality"), "medium");
   assert.equal(images.length, 2);
   assert.equal(images[0].name, "01-brand-logo-logo.png");
   assert.equal(images[0].type, "image/png");

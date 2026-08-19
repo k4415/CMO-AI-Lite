@@ -13,11 +13,10 @@ import { addBannerCreative, listBannerCreatives, updateBannerCreative } from "..
 
 const PNG_BYTES = Buffer.from("quality-test-png");
 
-test("バナー画像品質はlowを既定値にし、明示したmediumだけを許可する", () => {
-  assert.equal(resolveBannerImageQuality(undefined), "low");
+test("バナー画像品質はmediumを既定値にし、low/medium/high/auto/standardのみ許可する", () => {
+  assert.equal(resolveBannerImageQuality(undefined), "medium");
   assert.equal(resolveBannerImageQuality("low"), "low");
-  assert.equal(resolveBannerImageQuality("medium"), "medium");
-  assert.equal(resolveBannerImageQuality("unexpected"), "low");
+  assert.equal(resolveBannerImageQuality("unexpected"), "medium");
 });
 
 test("素材付き画像生成フォームは指定されたlow品質をgpt-image-2へ送る", () => {
@@ -32,7 +31,7 @@ test("素材付き画像生成フォームは指定されたlow品質をgpt-imag
   assert.equal(form.get("model"), "gpt-image-2");
 });
 
-test("通常画像生成はlowを既定値にして送信品質と所要時間を監査へ保存する", async (t) => {
+test("通常画像生成はmediumを既定値にして送信品質と所要時間を監査へ保存する", async (t) => {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cmoai-image-quality-"));
   t.after(() => fs.rm(projectRoot, { recursive: true, force: true }));
   await fs.mkdir(path.join(projectRoot, "data"), { recursive: true });
@@ -76,9 +75,9 @@ test("通常画像生成はlowを既定値にして送信品質と所要時間�
   });
   const [stored] = await listBannerCreatives(projectRoot);
 
-  assert.equal(requestBody.quality, "low");
-  assert.equal(stored.imageGenerationAudit.quality, "low");
-  assert.equal(stored.imageGenerationAudit.attempts[0].quality, "low");
+  assert.equal(requestBody.quality, "medium");
+  assert.equal(stored.imageGenerationAudit.quality, "medium");
+  assert.equal(stored.imageGenerationAudit.attempts[0].quality, "medium");
   assert.ok(Number.isInteger(stored.imageGenerationAudit.attempts[0].durationMs));
   assert.ok(stored.imageGenerationAudit.attempts[0].durationMs >= 0);
 });

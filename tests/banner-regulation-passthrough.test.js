@@ -62,7 +62,7 @@ test("無効ルールと他商品ルールはライター入力から除外さ�
 test("ライターへ渡す色リストは役割別HEXではなく重複排除される", async () => {
   const user = await captureWriterUser({ expressionRules: [] });
 
-  assert.match(user, /ブランドカラー（この範囲で構成する）: #041024 \/ #2460F0 \/ #FFFFFF/);
+  assert.match(user, /カラーアンカー: #041024 \/ #2460F0 \/ #FFFFFF/);
   assert.doesNotMatch(user, /配色palette:/);
   assert.doesNotMatch(user, /"main":"#041024"/);
 });
@@ -182,8 +182,9 @@ Elements:
 
 test("散文アセンブリの配色ブロックは重複排除した色リストで役割別HEXが無い", () => {
   const prompt = buildBannerImagePrompt(assemblyBanner(), []);
-  assert.match(prompt, /ブランドカラー（この3色で構成する）: #041024 \/ #2460F0 \/ #FFFFFF/);
-  assert.match(prompt, /文字と背景のコントラストを必ず確保する。palette外の色を主要色に使わない。/);
+  assert.match(prompt, /カラーアンカー: #041024 \/ #2460F0 \/ #FFFFFF/);
+  assert.match(prompt, /アンカー色から派生する範囲で展開してよい/);
+  assert.match(prompt, /アンカーと無関係な色を新たな主要色として導入しない/);
   assert.doesNotMatch(prompt, /確定配色:/);
   assert.doesNotMatch(prompt, /main=#/);
   assert.doesNotMatch(prompt, /background=#041024/);
