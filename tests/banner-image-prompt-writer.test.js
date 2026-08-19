@@ -6,14 +6,24 @@ import { fileURLToPath } from "node:url";
 
 import { writeBannerImagePrompt } from "../src/core/banner-image-prompt-writer.js";
 import { buildSelectedAssetPlacementPlan } from "../src/core/openai-image.js";
+import { PIPELINE_POLICY_VERSIONS } from "../src/core/banner-pipeline-state.js";
 
-const LONG_PROSE = [
+const WRITER_HEADER_LINES = [
+  "形式：1080x1080の正方形広告バナー。",
+  "目的・戦略：贈答を急ぐ人の不安を解消し、当日中に届く安心感から購入を促す。",
+  "スタイル・トーン：温かみのある幸福感と華やかさを、木目と朝光で表現する。"
+];
+
+const LONG_PROSE_BODY = [
   "視線は画面上部のメインビジュアルから入り、斜めの帯が左下の商品ゾーンへ誘導する。",
   "背景は朝の柔らかい側光を受けたテーブル面で、木目の質感と浅い被写界深度を使う。",
   "指定スロット内でのみ添付素材を見せ、他のimage枠には生成する被写体とシーンを置く。",
   "最大コピーは独立したオーバーレイ文字として浮かせ、素材表面への印字や刻印にはしない。",
   "配色は指定paletteの役割を守り、メインを布地の陰影、アクセントをCTA面の光沢で表現する。"
 ].join("");
+
+const LONG_PROSE = [...WRITER_HEADER_LINES, LONG_PROSE_BODY].join("\n");
+const LONG_PROSE_WITHOUT_HEADERS = LONG_PROSE_BODY;
 
 assert.ok(LONG_PROSE.length >= 200);
 
@@ -115,11 +125,99 @@ test("確定コピーはwrittenImagePromptとstyleNotesの両方から行単位�
   assert.doesNotMatch(result.styleNotes, /今すぐ見る/);
 });
 
+test("3行ヘッダー行はコピー混入があってもサニタイズで除去しない", async () => {
+  const headerWithCopyPhrase = [
+    "形式：1080x1080の正方形広告バナー。",
+    "目的・戦略：今朝届く贈答という訴求軸で、贈答を急ぐ人の行動を促す。",
+    "スタイル・トーン：今すぐ見るCTAのトーンに合わせた高揚感を与える。"
+  ].join("\n");
+  const proseWithHeaders = `${headerWithCopyPhrase}\n${LONG_PROSE_BODY}`;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => ({
+      writtenImagePrompt: proseWithHeaders,
+      styleNotes: "木目の質感を残す"
+    })
+  });
+
+  assert.equal(result.writtenImagePrompt, proseWithHeaders);
+  assert.match(result.writtenImagePrompt, /^形式：/m);
+  assert.match(result.writtenImagePrompt, /^目的・戦略：/m);
+  assert.match(result.writtenImagePrompt, /^スタイル・トーン：/m);
+});
+
+test("半角コロンの3行ヘッダーは合格する", async () => {
+  const halfWidthHeaders = [
+    "形式:1080x1080の正方形広告バナー。",
+    "目的・戦略:贈答を急ぐ人の不安を解消し、当日中に届く安心感から購入を促す。",
+    "スタイル・トーン:温かみのある幸福感と華やかさを、木目と朝光で表現する。"
+  ].join("\n");
+  const prose = `${halfWidthHeaders}\n${LONG_PROSE_BODY}`;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => ({
+      writtenImagePrompt: prose,
+      styleNotes: "質感メモ"
+    })
+  });
+
+  assert.equal(result.writtenImagePrompt, prose);
+  assert.equal(result.writerAudit.outcome, "completed");
+  assert.equal(result.writerAudit.fallback, false);
+});
+
+test("ヘッダー前に別の非空行がある場合は失敗扱いでリトライする", async () => {
+  let attempts = 0;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      attempts += 1;
+      return {
+        writtenImagePrompt: `前置き行\n${LONG_PROSE}`,
+        styleNotes: "質感メモ"
+      };
+    }
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.writtenImagePrompt, "");
+  assert.equal(result.writerAudit.outcome, "failed");
+  assert.equal(result.writerAudit.fallback, true);
+});
+
+test("3行ヘッダー行の前後空白はtrimして判定する", async () => {
+  const paddedHeaders = WRITER_HEADER_LINES.map((line) => `  ${line}  `).join("\n");
+  const prose = `${paddedHeaders}\n${LONG_PROSE_BODY}`;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => ({
+      writtenImagePrompt: prose,
+      styleNotes: "質感メモ"
+    })
+  });
+
+  assert.equal(result.writerAudit.outcome, "completed");
+  assert.equal(result.writerAudit.fallback, false);
+  const headerLines = result.writtenImagePrompt
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+  assert.match(headerLines[0], /^形式[：:]/);
+  assert.match(headerLines[1], /^目的・戦略[：:]/);
+  assert.match(headerLines[2], /^スタイル・トーン[：:]/);
+});
+
 test("サニタイズ後に散文が200字未満なら失敗扱いになる", async () => {
   const result = await writeBannerImagePrompt({
     ...baseInput(),
     jsonGenerator: async () => ({
-      writtenImagePrompt: "今朝届く贈答を大きく置く短い描写",
+      writtenImagePrompt: [
+        "形式：1080x1080の正方形広告バナー。",
+        "目的・戦略：短い訴求。",
+        "スタイル・トーン：短いトーン。",
+        "今朝届く贈答を大きく置く短い描写"
+      ].join("\n"),
       styleNotes: "今すぐ見る"
     })
   });
@@ -128,6 +226,50 @@ test("サニタイズ後に散文が200字未満なら失敗扱いになる", as
   assert.equal(result.styleNotes, "");
   assert.equal(result.writerAudit.outcome, "failed");
   assert.equal(result.writerAudit.fallback, true);
+});
+
+test("3行ヘッダー欠落時はリトライし、2回失敗なら空散文フォールバック", async () => {
+  let attempts = 0;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      attempts += 1;
+      return {
+        writtenImagePrompt: LONG_PROSE_WITHOUT_HEADERS,
+        styleNotes: "朝の側光と木目の質感を優先する"
+      };
+    }
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.writtenImagePrompt, "");
+  assert.equal(result.styleNotes, "");
+  assert.equal(result.writerAudit.calls, 2);
+  assert.equal(result.writerAudit.outcome, "failed");
+  assert.equal(result.writerAudit.fallback, true);
+});
+
+test("1回目ヘッダー欠落後のリトライ成功ではcompletedになる", async () => {
+  let attempts = 0;
+  const result = await writeBannerImagePrompt({
+    ...baseInput(),
+    jsonGenerator: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        return {
+          writtenImagePrompt: LONG_PROSE_WITHOUT_HEADERS,
+          styleNotes: "質感メモ"
+        };
+      }
+      return { writtenImagePrompt: LONG_PROSE, styleNotes: "質感メモ" };
+    }
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.writtenImagePrompt, LONG_PROSE);
+  assert.equal(result.writerAudit.calls, 2);
+  assert.equal(result.writerAudit.outcome, "completed");
+  assert.equal(result.writerAudit.fallback, false);
 });
 
 test("失敗時は1回リトライし、それでも失敗なら空文字とfallbackを返す", async () => {
@@ -214,4 +356,27 @@ test("ライタープロンプトは色境界・コントラスト確保・見�
   assert.match(prompt, /組み合わせOK:|組み合わせNG:|推奨比率:/);
   assert.match(prompt, /見出し.*配下項目の関係|配下項目の関係を尊重/);
   assert.match(prompt, /NG側に列挙された配色・表現は採用しない/);
+});
+
+test("ライタープロンプトに3行ヘッダー契約と配色記述契約がある", () => {
+  const promptPath = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "config",
+    "prompts",
+    "banner-image-prompt-writer.md"
+  );
+  const prompt = fs.readFileSync(promptPath, "utf8");
+  assert.match(prompt, /形式：.*サイズと.*広告バナー/);
+  assert.match(prompt, /目的・戦略：.*誰のどんな認識をどう変え.*行動をとってもらうか/);
+  assert.match(prompt, /コピー文言は書かない/);
+  assert.match(prompt, /スタイル・トーン：.*印象・トーン・色彩設計の意図/);
+  assert.match(prompt, /確定パレットの色をどの役割（濃色・誘目色・背景）にどう使い分けるか/);
+  assert.match(prompt, /選定理由を1文含める/);
+  assert.match(prompt, /華やかさ・高揚感・幸福感・安心感/);
+  assert.match(prompt, /落ち着き・信頼系に固定しない/);
+});
+
+test("PIPELINE_POLICY_VERSIONS.promptは4", () => {
+  assert.equal(PIPELINE_POLICY_VERSIONS.prompt, 4);
 });

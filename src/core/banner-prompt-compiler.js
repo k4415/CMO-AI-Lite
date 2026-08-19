@@ -1,4 +1,4 @@
-import { buildColorNeutralTemplateZones } from "./banner-template-color.js";
+import { buildColorNeutralTemplateZones, stripTemplateColorTokens } from "./banner-template-color.js";
 
 const IMAGE_TYPES = new Set(["image"]);
 const SHAPE_TYPES = new Set(["shape"]);
@@ -16,8 +16,9 @@ export function compileClosedTemplatePromptSeed({
     .map((slot) => [String(slot?.slotId || ""), String(slot?.text || "")])
     .filter(([slotId]) => slotId));
   const visualIntent = safeVisualIntentText(creativeHypothesis?.visualIntent, banner);
+  const rawTemplateZones = Array.isArray(template.templateZones) ? template.templateZones : [];
   const neutralTemplateZones = buildColorNeutralTemplateZones(
-    template.templateZones,
+    rawTemplateZones,
     template.templateColorScheme || template.templatePromptJson?.colorScheme
   );
   const variationDirection = uniqueStrings([
@@ -28,43 +29,52 @@ export function compileClosedTemplatePromptSeed({
   const designRationale = uniqueStrings([
     visualIntent,
     variationDirection,
-    instructionPolicy.rawInstruction
+    instructionPolicy.rawInstruction,
+    stripTemplateColorTokens(template?.templateGlobalDesign?.designRationale || "")
   ]).join(" / ");
 
-  const zones = neutralTemplateZones.map((zone, zoneIndex) => ({
-    position: String(zone?.position || zone?.area || ""),
-    purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
-    background: "",
-    backgroundColorRole: String(zone?.backgroundColorRole || ""),
-    elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => {
-      const type = normalizeElementType(element?.type);
-      const slotId = String(element?.slotId || `z${zoneIndex + 1}e${elementIndex + 1}`);
-      const role = String(element?.role || element?.name || "");
-      return {
-        type,
-        slotId,
-        role,
-        messageRole: String(element?.messageRole || ""),
-        content: elementContent({
-          element,
+  const zones = neutralTemplateZones.map((zone, zoneIndex) => {
+    const rawZone = rawTemplateZones[zoneIndex] || {};
+    const rawElements = Array.isArray(rawZone?.elements) ? rawZone.elements : [];
+    return {
+      name: String(rawZone?.name || zone?.name || ""),
+      position: String(zone?.position || zone?.area || ""),
+      purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
+      background: stripTemplateColorTokens(String(rawZone?.background || "")),
+      backgroundColorRole: String(zone?.backgroundColorRole || ""),
+      elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => {
+        const rawElement = rawElements[elementIndex] || {};
+        const type = normalizeElementType(element?.type);
+        const slotId = String(element?.slotId || `z${zoneIndex + 1}e${elementIndex + 1}`);
+        const role = String(element?.role || element?.name || "");
+        return {
           type,
-          role,
           slotId,
-          slotTextById,
-          product,
-          visualIntent,
-          variationDirection
-        }),
-        position: plainObject(element?.position),
-        size: String(element?.size || ""),
-        colorRole: String(element?.colorRole || ""),
-        effect: String(element?.effect || ""),
-        targetChars: element?.charCount ?? element?.characterCount ?? "",
-        sourceReason: sourceReasonFor(type, visualIntent, variationDirection),
-        templateReuseLevel: "closed-structure"
-      };
-    })
-  }));
+          role,
+          messageRole: String(element?.messageRole || ""),
+          content: elementContent({
+            element,
+            rawElement,
+            type,
+            role,
+            slotId,
+            slotTextById,
+            product,
+            visualIntent,
+            variationDirection
+          }),
+          position: plainObject(element?.position),
+          size: String(element?.size || ""),
+          font: stripTemplateColorTokens(String(rawElement?.font || element?.font || "")),
+          colorRole: String(element?.colorRole || ""),
+          effect: String(element?.effect || ""),
+          targetChars: element?.charCount ?? element?.characterCount ?? "",
+          sourceReason: sourceReasonFor(type, visualIntent, variationDirection),
+          templateReuseLevel: "closed-structure"
+        };
+      })
+    };
+  });
 
   return {
     promptJson: {
@@ -73,7 +83,10 @@ export function compileClosedTemplatePromptSeed({
       desire: strategyText(strategy, "desire"),
       benefit: strategyText(strategy, "benefit", "productConcept", "markdown"),
       offer: strategyText(strategy, "offer") || String(copyBrief.offerBadge || ""),
-      globalDesign: { designRationale },
+      globalDesign: {
+        designRationale,
+        colorPolicy: "テンプレ由来の色表現は役割・トーンの参考。具体色は確定パレット（colorScheme）に必ず従う"
+      },
       colorScheme: {},
       additionalInstruction: String(instructionPolicy.rawInstruction || ""),
       zones,
@@ -86,21 +99,25 @@ export function compileClosedTemplatePromptSeed({
   };
 }
 
-function elementContent({ element, type, role, slotId, slotTextById, product, visualIntent, variationDirection }) {
+function elementContent({ element, rawElement, type, role, slotId, slotTextById, product, visualIntent, variationDirection }) {
   if (type === "text") {
     if (slotTextById.has(slotId)) return slotTextById.get(slotId);
     if (isBrandText(role, element?.messageRole)) return String(product.brandName || product.name || "");
     return "";
   }
   if (IMAGE_TYPES.has(type)) {
-    const messageRole = String(element?.messageRole || "");
+    const messageRole = String(element?.messageRole || rawElement?.messageRole || "");
+    const rawDescription = stripTemplateColorTokens(
+      String(rawElement?.content || rawElement?.description || element?.content || element?.description || "")
+    ).trim();
+    const prefix = (value) => (rawDescription ? `${rawDescription}。${value}` : value);
     if (/person|人物/i.test(`${role} ${messageRole}`)) {
-      return "人物画像枠。選択WHO-WHATのターゲットを1人の自然な場面として表現する。読める文字を入れず、ユーザー選択素材を複製・模倣しない。";
+      return prefix("人物画像枠。選択WHO-WHATのターゲットを1人の自然な場面として表現する。読める文字を入れず、ユーザー選択素材を複製・模倣しない。");
     }
     if (/background|decoration|背景|装飾/i.test(`${role} ${messageRole}`)) {
-      return "背景・装飾画像枠。選択WHO-WHATの利用場面を低コントラストで表現する。読める文字を入れず、ユーザー選択素材を複製・模倣しない。";
+      return prefix("背景・装飾画像枠。選択WHO-WHATの利用場面を低コントラストで表現する。読める文字を入れず、ユーザー選択素材を複製・模倣しない。");
     }
-    return `画像枠（${role || "visual"}）。選択WHO-WHATの対象場面を文字なしで表現する。ユーザー選択素材を複製・模倣しない。`;
+    return prefix(`画像枠（${role || "visual"}）。選択WHO-WHATの対象場面を文字なしで表現する。ユーザー選択素材を複製・模倣しない。`);
   }
   if (SHAPE_TYPES.has(type)) return String(element?.description || element?.content || "");
   return "";

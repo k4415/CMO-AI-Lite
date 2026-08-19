@@ -10,6 +10,8 @@ import {
   stripTemplateColorTokens,
   TEMPLATE_COLOR_TOKEN_PATTERN
 } from "../src/core/banner-template-color.js";
+import { compileClosedTemplatePromptSeed } from "../src/core/banner-prompt-compiler.js";
+import { normalizeBannerProposal } from "../src/core/banner-ai.js";
 import { enforceTemplateStructure } from "../src/core/banner-template-structure.js";
 
 const PALETTE = {
@@ -18,6 +20,30 @@ const PALETTE = {
   accent: "#2563EB",
   background: "#F7FAFC"
 };
+
+test("投影強化後のcompile seedは全配布テンプレで本番normalize後にauditPromptColorContractを通過する", async () => {
+  const templates = JSON.parse(await fs.readFile(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
+
+  for (const template of templates) {
+    const seed = compileClosedTemplatePromptSeed({
+      banner: { imageSize: "1080x1080" },
+      product: { name: "検証商品" },
+      strategy: { markdown: "WHO: 広告運用者\nWHAT: 制作を短縮" },
+      template,
+      copyBrief: { slotTexts: [] },
+      creativeHypothesis: { visualIntent: { scene: "制作現場" } }
+    });
+    const proposal = normalizeBannerProposal(seed, {
+      banner: { imageSize: "1080x1080" },
+      product: { name: "検証商品" },
+      strategy: { markdown: "WHO: 広告運用者\nWHAT: 制作を短縮" },
+      template,
+      copyBrief: { slotTexts: [] }
+    });
+    assert.equal(proposal.colorDecision.contractReview.status, "passed", template.id);
+  }
+});
 
 test("色指定なしでも構造正規化後に元テンプレ色語を復元しない", () => {
   const templateZones = [{
@@ -166,6 +192,7 @@ test("配布100件を維持し、全登録テンプレで色中立化と再バ�
 function collectColorBearingText(zones) {
   return (zones || []).flatMap((zone) => [
     zone.background || "",
+    zone.backgroundStyle || "",
     ...(zone.elements || []).flatMap((element) => [
       element.color || "",
       element.effect || "",
