@@ -142,7 +142,9 @@ function enqueueClaimedBannerImageJob(projectRoot, bannerId, attemptId, taskFact
         ? taskFactory(started, context)
         : generateBannerImageWithGptImage2(projectRoot, started, context));
     } catch (error) {
-      await failBannerImageGeneration(projectRoot, bannerId, attemptId, error.message);
+      if (!error?.imageFailurePersisted) {
+        await failBannerImageGeneration(projectRoot, bannerId, attemptId, error.message);
+      }
       throw error;
     } finally {
       if (releaseSlot) await releaseSlot();

@@ -11,6 +11,7 @@ Claude Code / Codex や別ツールの生成結果をUIへ反映するための�
   → WHO-WHAT戦略
   → バナー画像テンプレ + 追加指示
   → copyBrief + promptJson
+  → デザイン散文（W契約）
   → gpt-image-2
 ```
 
@@ -72,8 +73,10 @@ UIから手動追加・編集する場合は、複数の構造化入力欄へ分
 ```
 
 ```json
-{"project":"./projects/sample","patch":{"copyBrief":{},"imageText":"メインコピーと補足コピー","promptJson":{},"promptText":"gpt-image-2へ渡す完成プロンプト","productionStatus":"prompt_ready"}}
+{"project":"./projects/sample","patch":{"copyBrief":{},"imageText":"メインコピーと補足コピー","promptJson":{},"promptText":"gpt-image-2へ渡す完成プロンプト","writtenImagePrompt":"形式：…\n目的・戦略：…\nスタイル・トーン：…\n（視線順の描写）","styleNotes":"ライティング・質感の補足","productionStatus":"prompt_ready"}}
 ```
+
+`writtenImagePrompt` / `styleNotes` は Stage 2b の出力。W契約: 先頭3非空行が「形式：」「目的・戦略：」「スタイル・トーン：」で始まること、slotTextsの文言を散文に書かないこと、確定パレットの使い分けと選定理由を1文含めること、200字以上であること。どちらかが空だと画像生成は旧式JSONダンププロンプトにフォールバックする。
 
 ## 禁止事項
 

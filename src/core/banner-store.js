@@ -934,6 +934,7 @@ function applyPipelineArtifactInvalidation(patch, current, node, copyLocked = fa
     patch.promptText = "";
     patch.writtenImagePrompt = "";
     patch.styleNotes = "";
+    patch.finalImagePrompt = "";
     patch.structureSheet = null;
     patch.reviewChecklist = null;
     patch.visualHypothesisRef = null;
@@ -946,6 +947,7 @@ function applyPipelineArtifactInvalidation(patch, current, node, copyLocked = fa
     patch.generatedImageSize = "";
     patch.previewPath = "";
     patch.images = [];
+    patch.finalImagePrompt = "";
   }
 }
 
@@ -1783,6 +1785,7 @@ function normalizeBanner(input) {
     promptJson: input.promptJson || null,
     promptText: clean(input.promptText),
     writtenImagePrompt: clean(input.writtenImagePrompt),
+    finalImagePrompt: clean(input.finalImagePrompt),
     styleNotes: clean(input.styleNotes),
     structureSheet: input.structureSheet || input.promptJson?.structureSheet || null,
     regulationCheck: input.regulationCheck || null,

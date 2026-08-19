@@ -6059,7 +6059,7 @@ function bannerDetailHtml(value) {
       bannerWarningsDetailHtml(value),
       outputReviewBlockHtml("画像テキスト", value.imageText || "未生成", { readable: true }),
       bannerCopyBriefBlockHtml(value.copyBrief || value.promptJson?.copyBrief),
-      outputReviewBlockHtml("prompt", value.promptText || JSON.stringify(value.promptJson || {}, null, 2), { tall: true }),
+      ...bannerPromptDisplayBlocksHtml(value),
       structuredZonesBlockHtml(value.promptJson),
       bannerLegacyFactCheckDetailHtml(value.factCheck)
     ],
@@ -6232,6 +6232,35 @@ function bannerLegacyFactCheckDetailHtml(factCheck) {
   const heading = warnings.length ? "要確認" : "問題なし";
   const body = [heading, ...warnings, factCheck.note || "", factCheck.checkedAt ? "確認日時: " + formatDateTime(factCheck.checkedAt) : ""].filter(Boolean).join("\n");
   return outputReviewBlockHtml("旧データのファクトチェック（新規生成では未使用）", body, { readable: true });
+}
+
+function bannerPromptDisplayBlocksHtml(value) {
+  const blocks = [];
+  if (value.finalImagePrompt) {
+    blocks.push(outputReviewBlockHtml("送信済み最終プロンプト", value.finalImagePrompt, { tall: true, readable: true }));
+  } else {
+    blocks.push('<section class="outputReviewBlock"><header><h3>送信済み最終プロンプト</h3></header><p class="mutedCell bannerPromptPendingNote">画像生成時に散文込みで組み立てられます</p></section>');
+  }
+  if (value.writtenImagePrompt) {
+    blocks.push(outputReviewBlockHtml("デザイン散文", value.writtenImagePrompt, { tall: true, readable: true }));
+  }
+  const legacyPrompt = value.promptText || JSON.stringify(value.promptJson || {}, null, 2);
+  blocks.push(collapsibleOutputReviewBlockHtml(
+    "プロンプトデータ（旧形式プレビュー・送信時に散文込みで再組み立て）",
+    legacyPrompt,
+    { tall: true }
+  ));
+  return blocks;
+}
+
+function collapsibleOutputReviewBlockHtml(title, text, options = {}) {
+  const classes = ["detailRawInfo", "outputReviewCollapsible"];
+  if (options.tall) classes.push("tall");
+  if (options.readable) classes.push("readable");
+  return '<details class="' + classes.join(" ") + '">'
+    + '<summary>' + escapeHtml(title) + '</summary>'
+    + '<pre>' + escapeHtml(text || "") + '</pre>'
+    + '</details>';
 }
 
 function bannerCopyBriefBlockHtml(copyBrief) {
