@@ -110,7 +110,7 @@ export async function writeBannerImagePrompt({
 
 function resolveWriterModel() {
   const configured = String(process.env.CMOAI_PROMPT_WRITER_MODEL || "").trim();
-  return configured || "claude-opus-5";
+  return configured || "claude-sonnet-5";
 }
 
 function buildWriterAudit({ model, calls, outputChars, fallback }) {

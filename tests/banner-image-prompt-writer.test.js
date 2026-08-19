@@ -70,7 +70,7 @@ test("buildSelectedAssetPlacementPlanがexportされ、image枠へ素材を割�
   }]);
 });
 
-test("ライターは既定でclaude-opus-5を明示指定し、散文とstyleNotesを返す", async () => {
+test("ライターは既定でclaude-sonnet-5を明示指定し、散文とstyleNotesを返す", async () => {
   const calls = [];
   const result = await writeBannerImagePrompt({
     ...baseInput(),
@@ -81,10 +81,10 @@ test("ライターは既定でclaude-opus-5を明示指定し、散文とstyleNo
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].model, "claude-opus-5");
+  assert.equal(calls[0].model, "claude-sonnet-5");
   assert.equal(result.writtenImagePrompt, LONG_PROSE);
   assert.equal(result.styleNotes, "朝の側光と木目の質感を優先する");
-  assert.equal(result.writerAudit.model, "claude-opus-5");
+  assert.equal(result.writerAudit.model, "claude-sonnet-5");
   assert.equal(result.writerAudit.calls, 1);
   assert.ok(result.writerAudit.outputChars > 0);
   assert.equal(result.writerAudit.outcome, "completed");
