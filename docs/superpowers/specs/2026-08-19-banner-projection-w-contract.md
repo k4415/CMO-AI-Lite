@@ -42,13 +42,13 @@
 
 ### C. アーム比較ハーネス（検証用）
 
-`scripts/banner-writer-arm-compare.mjs` を新設。既存バナー1件を入力に、`CMOAI_PROMPT_WRITER_MODEL` を claude-opus-5 / claude-sonnet-5 で切り替えてライター＋最終プロンプト組み立てまでを実行し、散文と最終プロンプトを並べて `outputs/arm-compare/` に保存する（画像生成はオプションフラグ `--images` 時のみ）。鴻上さんの目視判定材料にする。
+`scripts/banner-writer-arm-compare.mjs` を新設。既存バナー1件を入力に、`CMOAI_PROMPT_WRITER_MODEL` を claude-opus-5 / claude-sonnet-5 で切り替えてライター＋最終プロンプト組み立てまでを実行し、散文と最終プロンプトを並べて `outputs/arm-compare/` に保存する（画像生成はオプションフラグ `--images` 時のみ）。人間の目視判定材料にする。
 
 ## 検証
 
 - 既存テスト506件の回帰 + 追加テスト（投影強化の各項目、色トークン除去、ヘッダー契約、サニタイズとヘッダーの共存、ポリシーバージョン）
 - プロンプトmdの契約文言はテストで逐語アサート（Pro H-476の作法）
-- 実画像: ハーネスで Opus 5 vs Sonnet 5 のアーム比較 → 鴻上さん目視判定でライター既定モデルを確定
+- 実画像: ハーネスで Opus 5 vs Sonnet 5 のアーム比較 → 人間の目視判定でライター既定モデルを確定
 
 ## スコープ外
 
