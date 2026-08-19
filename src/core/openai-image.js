@@ -933,11 +933,10 @@ function clipWriterDesignBlocks(writtenImagePrompt, styleNotes, remaining) {
 
 function formatWrittenBrandColorBoundary(colorScheme) {
   const colors = listUniqueBrandColors(colorScheme);
-  const label = colors.length ? `この${colors.length}色で構成する` : "この範囲で構成する";
   const list = colors.join(" / ");
   return [
-    list ? `ブランドカラー（${label}）: ${list}` : `ブランドカラー（${label}）:`,
-    "文字と背景のコントラストを必ず確保する。palette外の色を主要色に使わない。"
+    list ? `カラーアンカー: ${list}` : "カラーアンカー:",
+    "この色を起点に、トーン・グラデーション・素材感・光の演出はアンカー色から派生する範囲で展開してよい。文字と背景のコントラストを必ず確保する。アンカーと無関係な色を新たな主要色として導入しない。"
   ].join("\n");
 }
 

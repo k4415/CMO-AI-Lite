@@ -12,7 +12,7 @@ export const PIPELINE_NODE_ORDER = [
 
 export const PIPELINE_POLICY_VERSIONS = Object.freeze({
   copyplan: 2,
-  prompt: 4,
+  prompt: 5,
   image: 2
 });
 

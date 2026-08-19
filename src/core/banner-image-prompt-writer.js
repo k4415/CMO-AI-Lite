@@ -12,6 +12,7 @@ const WRITER_HEADER_LINE_PATTERNS = [
 const WRITER_HEADER_SANITIZE_PATTERN = /^(形式|目的・戦略|スタイル・トーン)[：:]/;
 // コピー開発用の予算を継承すると散文が途中で切れるため、ライター専用の枠を持つ。
 const WRITER_MAX_TOKENS = Number(process.env.CMOAI_PROMPT_WRITER_MAX_TOKENS) || 8000;
+const STRATEGY_MARKDOWN_CLIP = 12000;
 // 実測55〜81秒。prompt工程のリースを超えないよう上限を明示する。
 const WRITER_TIMEOUT_MS = Number(process.env.CMOAI_PROMPT_WRITER_TIMEOUT_MS) || 180000;
 
@@ -20,6 +21,7 @@ export async function writeBannerImagePrompt({
   product,
   strategy,
   copyBrief,
+  creativeHypothesis,
   colorDecision,
   templateStructureContract,
   selectedAssetPlacements,
@@ -34,6 +36,7 @@ export async function writeBannerImagePrompt({
     product,
     strategy,
     copyBrief,
+    creativeHypothesis,
     colorDecision,
     templateStructureContract,
     selectedAssetPlacements,
@@ -185,6 +188,7 @@ function buildWriterUserPrompt({
   product,
   strategy,
   copyBrief,
+  creativeHypothesis,
   colorDecision,
   templateStructureContract,
   selectedAssetPlacements,
@@ -196,6 +200,7 @@ function buildWriterUserPrompt({
     slotId: String(slot?.slotId || ""),
     role: String(slot?.role || slot?.canonicalField || "")
   }));
+  const hypothesisBlock = formatCreativeHypothesisBlock(creativeHypothesis, copyBrief);
   return [
     "次の確定構造から、gpt-image-2向けの完成イメージ散文を書いてください。コピー文言は出力に含めないでください。",
     "商品: " + JSON.stringify({
@@ -208,12 +213,13 @@ function buildWriterUserPrompt({
       id: strategy?.id || "",
       conceptName: strategy?.conceptName || "",
       segmentName: strategy?.segmentName || "",
-      markdown: String(strategy?.markdown || "").slice(0, 3000),
+      markdown: String(strategy?.markdown || "").slice(0, STRATEGY_MARKDOWN_CLIP),
       targetAttributes: strategy?.targetAttributes || strategy?.target || "",
       desire: strategy?.desire || "",
       benefit: strategy?.benefit || "",
       offer: strategy?.offer || ""
     }),
+    hypothesisBlock,
     "タイポグラフィ参照（文言は書かない）: " + JSON.stringify(slots),
     formatBrandColorBoundary(colorDecision?.palette),
     formatExpressionRulesForWriter(expressionRules, product),
@@ -225,10 +231,38 @@ function buildWriterUserPrompt({
   ].filter(Boolean).join("\n");
 }
 
+function formatCreativeHypothesisBlock(creativeHypothesis, copyBrief) {
+  const hypothesis = creativeHypothesis && typeof creativeHypothesis === "object" ? creativeHypothesis : null;
+  const brief = copyBrief && typeof copyBrief === "object" ? copyBrief : null;
+  const summary = {
+    appealAxis: cleanText(brief?.appealAxis || hypothesis?.chosenAngle),
+    audienceAttribute: cleanText(hypothesis?.audienceAttribute),
+    targetMoment: cleanText(hypothesis?.targetMoment || brief?.targetMoment),
+    barrier: cleanText(hypothesis?.barrier),
+    primaryPromise: cleanText(hypothesis?.primaryPromise),
+    templateMechanism: cleanText(hypothesis?.templateMechanism),
+    visualIntent: {
+      scene: cleanText(hypothesis?.visualIntent?.scene),
+      motif: cleanText(hypothesis?.visualIntent?.motif)
+    }
+  };
+  if (!summary.visualIntent.scene && !summary.visualIntent.motif) delete summary.visualIntent;
+  const hasContent = Object.entries(summary).some(([key, value]) => {
+    if (key === "visualIntent") return Boolean(value?.scene || value?.motif);
+    return Boolean(value);
+  });
+  if (!hasContent) return "";
+  return "訴求仮説要点（creativeHypothesis）: " + JSON.stringify(summary);
+}
+
+function cleanText(value) {
+  return String(value ?? "").trim();
+}
+
 function formatBrandColorBoundary(palette) {
   const colors = listUniqueBrandColors(palette);
-  if (!colors.length) return "ブランドカラー（この範囲で構成する）:";
-  return `ブランドカラー（この範囲で構成する）: ${colors.join(" / ")}`;
+  if (!colors.length) return "カラーアンカー:";
+  return `カラーアンカー: ${colors.join(" / ")}`;
 }
 
 function formatExpressionRulesForWriter(expressionRules, product) {

@@ -424,7 +424,11 @@ test("ライタープロンプトは色境界・コントラスト確保・見�
     "banner-image-prompt-writer.md"
   );
   const prompt = fs.readFileSync(promptPath, "utf8");
-  assert.match(prompt, /ブランドカラーの範囲で構成/);
+  assert.match(prompt, /カラーアンカー|アンカー色/);
+  assert.match(prompt, /役割構造（どの要素が濃色・誘目色・背景か）/);
+  assert.match(prompt, /コントラスト水準/);
+  assert.match(prompt, /トーンの感情/);
+  assert.match(prompt, /アンカー色からのトーン展開・素材感・商材を象徴する具体物のメタファー表現/);
   assert.match(prompt, /どの面にどの文字色/);
   assert.match(prompt, /コントラストを必ず確保/);
   assert.match(prompt, /組み合わせOK:|組み合わせNG:|推奨比率:/);
@@ -451,6 +455,64 @@ test("ライタープロンプトに3行ヘッダー契約と配色記述契約�
   assert.match(prompt, /落ち着き・信頼系に固定しない/);
 });
 
-test("PIPELINE_POLICY_VERSIONS.promptは4", () => {
-  assert.equal(PIPELINE_POLICY_VERSIONS.prompt, 4);
+test("PIPELINE_POLICY_VERSIONS.promptは5", () => {
+  assert.equal(PIPELINE_POLICY_VERSIONS.prompt, 5);
+});
+
+test("ライター入力は戦略markdownを12000字まで渡す", async () => {
+  const longTail = "末尾マーカー";
+  const markdown = "あ".repeat(12050) + longTail;
+  let capturedUser = "";
+  await writeBannerImagePrompt({
+    ...baseInput(),
+    strategy: { id: "s-long", markdown },
+    jsonGenerator: async (args) => {
+      capturedUser = String(args.user || "");
+      return { writtenImagePrompt: LONG_PROSE, styleNotes: "質感メモ" };
+    }
+  });
+
+  const strategyLine = capturedUser.split("\n").find((line) => line.startsWith("戦略: "));
+  assert.ok(strategyLine);
+  const parsed = JSON.parse(strategyLine.slice("戦略: ".length));
+  assert.equal(parsed.markdown.length, 12000);
+  assert.doesNotMatch(parsed.markdown, /末尾マーカー/);
+});
+
+test("creativeHypothesis要点があるときは明示ブロックを追加する", async () => {
+  let capturedUser = "";
+  await writeBannerImagePrompt({
+    ...baseInput(),
+    creativeHypothesis: {
+      chosenAngle: "当日配送",
+      audienceAttribute: "贈答を急ぐ人",
+      visualIntent: { scene: "朝の和室", motif: "木目の膳" }
+    },
+    jsonGenerator: async (args) => {
+      capturedUser = String(args.user || "");
+      return { writtenImagePrompt: LONG_PROSE, styleNotes: "質感メモ" };
+    }
+  });
+
+  assert.match(capturedUser, /訴求仮説要点（creativeHypothesis）:/);
+  assert.match(capturedUser, /"appealAxis":"当日配送"/);
+  assert.match(capturedUser, /"scene":"朝の和室"/);
+  assert.match(capturedUser, /"motif":"木目の膳"/);
+  assert.match(capturedUser, /多様性方針:/);
+});
+
+test("creativeHypothesis要点が空のときはブロックを省略する", async () => {
+  let capturedUser = "";
+  await writeBannerImagePrompt({
+    ...baseInput(),
+    copyBrief: { slotTexts: baseInput().copyBrief.slotTexts },
+    creativeHypothesis: { visualIntent: { scene: "", motif: "" } },
+    jsonGenerator: async (args) => {
+      capturedUser = String(args.user || "");
+      return { writtenImagePrompt: LONG_PROSE, styleNotes: "質感メモ" };
+    }
+  });
+
+  assert.doesNotMatch(capturedUser, /訴求仮説要点（creativeHypothesis）:/);
+  assert.match(capturedUser, /多様性方針:/);
 });

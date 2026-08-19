@@ -56,12 +56,13 @@ test("writtenImagePromptがある初回組み立ては散文先頭と末尾契�
   assert.match(prompt, new RegExp(COPY_LINE));
   assert.match(prompt, /【最終優先・確定コピー】/);
   assert.match(prompt, /Exclusive placement map/);
-  assert.match(prompt, /#7A1F1F/);
+  assert.match(prompt, /カラーアンカー: #7A1F1F/);
+  assert.match(prompt, /アンカー色から派生する範囲で展開してよい/);
   assert.doesNotMatch(prompt, /legacy-json-dump-marker/);
   assert.doesNotMatch(prompt, /【デザイン完成イメージ】/);
   assert.ok(prompt.indexOf("形式：") < prompt.indexOf("日本語のダイレクト広告バナー"));
-  assert.ok(prompt.indexOf("【最終優先・確定コピー】") > prompt.indexOf("ブランドカラー"));
-  assert.ok(prompt.indexOf("【最優先・閉じた構造契約】") > prompt.indexOf("ブランドカラー"));
+  assert.ok(prompt.indexOf("【最終優先・確定コピー】") > prompt.indexOf("カラーアンカー"));
+  assert.ok(prompt.indexOf("【最優先・閉じた構造契約】") > prompt.indexOf("カラーアンカー"));
 });
 
 test("空のwrittenImagePromptは現行のJSONダンプ組み立てへフォールバックする", () => {
