@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 
-import { generateBannerCreativeProposal } from "../src/core/banner-ai.js";
+import { generateBannerCreativeProposal, normalizeBannerProposal } from "../src/core/banner-ai.js";
 import { compileClosedTemplatePromptSeed } from "../src/core/banner-prompt-compiler.js";
 import { buildTemplateStructureContract, enforceTemplateStructure } from "../src/core/banner-template-structure.js";
 import { buildColorNeutralTemplateZones } from "../src/core/banner-template-color.js";
@@ -110,6 +110,198 @@ test("決定論的promptも正本のWHO-WHAT markdownと案別variationを画像
   assert.equal(proposal.colorDecision.sourceByField.background, "user_instruction");
   assert.notEqual(proposal.colorDecision.sourceByField.main, "user_instruction");
   assert.equal(proposal.promptJson.additionalInstruction, "背景は白を基調にして、人物を追加しない");
+});
+
+test("投影強化: zone.nameにテンプレ実zone名を保持する", () => {
+  const seed = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1024x1024" },
+    product: { name: "検証商品" },
+    strategy: { benefit: "比較しやすい" },
+    template: {
+      templateZones: [{
+        name: "上部フックエリア",
+        position: "top",
+        purpose: "募集終了の限定性を伝え、早期申込みを促す",
+        background: "白い角丸カード",
+        elements: [{ type: "text", slotId: "headline", role: "headline", font: "extra-bold Japanese gothic" }]
+      }]
+    },
+    copyBrief: { slotTexts: [{ slotId: "headline", text: "見出しコピー" }] },
+    instructionPolicy: {}
+  });
+
+  assert.equal(seed.promptJson.zones[0].name, "上部フックエリア");
+});
+
+test("投影強化: zone.backgroundをraw templateから色トークン除去して投影する", () => {
+  const seed = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1024x1024" },
+    template: {
+      templateZones: [{
+        name: "mainHeadline",
+        position: "center",
+        background: "オレンジ基調の放射状サンバースト",
+        elements: [{ type: "text", slotId: "headline", role: "headline" }]
+      }]
+    },
+    copyBrief: { slotTexts: [{ slotId: "headline", text: "見出し" }] }
+  });
+
+  assert.match(seed.promptJson.zones[0].background, /放射状サンバースト/);
+  assert.doesNotMatch(seed.promptJson.zones[0].background, /オレンジ/);
+});
+
+test("本番経路generateBannerCreativeProposalは投影強化フィールドを最終promptJsonへ届ける", async () => {
+  const proposal = await generateBannerCreativeProposal({
+    promptWriter: stubPromptWriter,
+    banner: { id: "banner-projection", imageSize: "1080x1080" },
+    product: { id: "product-1", name: "検証商品", brandTone: "明快" },
+    strategy: {
+      id: "strategy-projection",
+      markdown: "WHO: 広告運用者\nWHAT: 制作を短縮",
+      benefit: "検証案を早く増やせる"
+    },
+    template: {
+      id: "template-projection",
+      copyBlueprint: {
+        slots: [{ slotId: "headline", role: "headline", canonicalField: "mainHook", charBudget: 12 }]
+      },
+      templateGlobalDesign: {
+        designRationale: "大きな文字で段階的に提示し、写真で利用イメージを補う"
+      },
+      templateZones: [{
+        name: "上部フックエリア",
+        position: "top",
+        purpose: "hook",
+        background: "オレンジ基調の放射状サンバースト",
+        elements: [{
+          type: "text",
+          slotId: "headline",
+          role: "headline",
+          font: "extra-bold Japanese gothic, white on blue plate"
+        }]
+      }]
+    },
+    copyBrief: {
+      version: 3,
+      strategyId: "strategy-projection",
+      appealAxis: "速度",
+      variationDirection: "具体性を出す",
+      whyItStops: "所要時間が短く具体的に伝わるため",
+      mainHook: "3分で広告案",
+      slotTexts: [{ slotId: "headline", text: "3分で広告案" }]
+    },
+    creativeHypothesis: { visualIntent: { scene: "制作現場" } },
+    jsonGenerator: async () => { throw new Error("closed template must not call Stage 2 model"); }
+  });
+
+  const zone = proposal.promptJson.zones[0];
+  assert.equal(zone.name, "上部フックエリア");
+  assert.match(zone.backgroundStyle, /放射状サンバースト/);
+  assert.doesNotMatch(zone.backgroundStyle, /オレンジ/);
+  assert.match(zone.background, /^#[0-9a-f]{6}$/i);
+  assert.match(zone.elements[0].font, /extra-bold Japanese gothic/);
+  assert.doesNotMatch(zone.elements[0].font, /white|blue/i);
+  assert.equal(
+    proposal.promptJson.globalDesign.colorPolicy,
+    "テンプレ由来の色表現は役割・トーンの参考。具体色は確定パレット（colorScheme）に必ず従う"
+  );
+  assert.match(proposal.promptJson.globalDesign.designRationale, /段階的に提示/);
+  assert.match(proposal.promptJson.globalDesign.designRationale, /制作現場/);
+  assert.equal(proposal.colorDecision.contractReview.status, "passed");
+});
+
+test("投影強化: element.fontをraw templateから色トークン除去して投影する", () => {
+  const seed = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1024x1024" },
+    template: {
+      templateZones: [{
+        position: "top",
+        elements: [{
+          type: "text",
+          slotId: "headline",
+          role: "headline",
+          font: "extra-bold Japanese gothic, white on blue plate"
+        }]
+      }]
+    },
+    copyBrief: { slotTexts: [{ slotId: "headline", text: "見出し" }] }
+  });
+
+  assert.match(seed.promptJson.zones[0].elements[0].font, /extra-bold Japanese gothic/);
+  assert.doesNotMatch(seed.promptJson.zones[0].elements[0].font, /white|blue/i);
+});
+
+test("投影強化: image要素contentは元描写を前置し固定安全文言を維持する", () => {
+  const seed = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1024x1024" },
+    product: { name: "検証商品" },
+    strategy: { benefit: "比較しやすい" },
+    template: {
+      templateZones: [{
+        position: "center",
+        elements: [{
+          type: "image",
+          slotId: "scene",
+          role: "photo",
+          messageRole: "person",
+          description: "明るい室内の木製デスクで人物がノートPCを操作している横顔写真"
+        }]
+      }]
+    },
+    copyBrief: { slotTexts: [] }
+  });
+
+  const content = seed.promptJson.zones[0].elements[0].content;
+  assert.match(content, /^明るい室内の木製デスク/);
+  assert.match(content, /人物画像枠/);
+  assert.match(content, /読める文字を入れず/);
+  assert.match(content, /ユーザー選択素材を複製・模倣しない/);
+});
+
+test("投影強化: globalDesignにdesignRationaleとcolorPolicyを含める", () => {
+  const seed = compileClosedTemplatePromptSeed({
+    banner: { imageSize: "1024x1024" },
+    template: {
+      templateGlobalDesign: {
+        designRationale: "大きな文字で段階的に提示し、写真で利用イメージを補う"
+      },
+      templateZones: [{ position: "top", elements: [{ type: "text", slotId: "headline", role: "headline" }] }]
+    },
+    copyBrief: { slotTexts: [{ slotId: "headline", text: "見出し" }], variationDirection: "具体性を出す" },
+    creativeHypothesis: { visualIntent: { scene: "制作現場" } }
+  });
+
+  assert.match(seed.promptJson.globalDesign.designRationale, /制作現場/);
+  assert.match(seed.promptJson.globalDesign.designRationale, /段階的に提示/);
+  assert.equal(
+    seed.promptJson.globalDesign.colorPolicy,
+    "テンプレ由来の色表現は役割・トーンの参考。具体色は確定パレット（colorScheme）に必ず従う"
+  );
+});
+
+test("投影強化後も全配布テンプレで色監査がhard failしない", async () => {
+  const templates = JSON.parse(await fs.readFile(new URL("../data/ad-templates.json", import.meta.url), "utf8"));
+  assert.equal(templates.filter((template) => template.isBundled).length, 100);
+
+  for (const template of templates) {
+    const seed = compileClosedTemplatePromptSeed({
+      banner: { id: "validation", imageSize: "1080x1080" },
+      product: { id: "product-1", name: "検証商品" },
+      strategy: { id: "strategy-1", markdown: "WHO: 広告運用者\nWHAT: 制作を短縮" },
+      template,
+      copyBrief: { appealAxis: "時短", variationDirection: "具体性", slotTexts: [] },
+      creativeHypothesis: { visualIntent: { scene: "制作現場", motif: "速度" } }
+    });
+    const proposal = normalizeBannerProposal(seed, {
+      banner: { imageSize: "1080x1080" },
+      product: { id: "product-1", name: "検証商品" },
+      strategy: { id: "strategy-1", markdown: "WHO: 広告運用者\nWHAT: 制作を短縮" },
+      template,
+      copyBrief: { appealAxis: "時短", variationDirection: "具体性", slotTexts: [] }
+    });
+    assert.equal(proposal.colorDecision.contractReview.status, "passed", template.id);
+  }
 });
 
 test("閉じたテンプレは元広告のpurpose表層意味を新規画像へ持ち込まない", () => {

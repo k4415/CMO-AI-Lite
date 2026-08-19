@@ -746,7 +746,19 @@ function normalizePromptJson(promptJson, { banner, product, strategy, template, 
       contrastPolicy: modelDesign.contrastPolicy || templateDesign.contrastPolicy || { level: "high", note: "CTA and main copy must stand out" },
       visualStyle: resolvedVisualStyle,
       gridAlignment: modelDesign.gridAlignment || templateDesign.gridAlignment || { horizontal: "structured alignment", vertical: "zone based", note: "maintain template-like hierarchy" },
-      designRationale: stripTemplateColorTokens(modelDesign.designRationale || promptJson.visualDirection || diversityGuidance?.axisInstruction || "")
+      designRationale: stripTemplateColorTokens(
+        modelDesign.designRationale
+        || promptJson.globalDesign?.designRationale
+        || templateDesign.designRationale
+        || promptJson.visualDirection
+        || diversityGuidance?.axisInstruction
+        || ""
+      ),
+      colorPolicy: String(
+        modelDesign.colorPolicy
+        || promptJson.globalDesign?.colorPolicy
+        || "テンプレ由来の色表現は役割・トーンの参考。具体色は確定パレット（colorScheme）に必ず従う"
+      )
     },
     colorScheme: resolvedColorScheme,
     zones,
@@ -864,6 +876,7 @@ function normalizeZones(zones, copyBrief, copySlotPlan = null, product = {}) {
     purpose: String(zone.purpose || zone.role || ""),
     backgroundColorRole: String(zone.backgroundColorRole || ""),
     background: String(zone.background || ""),
+    backgroundStyle: String(zone.backgroundStyle || ""),
     elements: (Array.isArray(zone.elements) ? zone.elements : []).map((element, elementIndex) => {
       const type = String(element.type || "text");
       const normalized = {

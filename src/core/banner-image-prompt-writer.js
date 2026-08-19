@@ -4,6 +4,12 @@ import { loadPrompt } from "./prompt-files.js";
 
 const WRITER_SYSTEM = loadPrompt("banner-image-prompt-writer");
 const MIN_PROSE_CHARS = 200;
+const WRITER_HEADER_LINE_PATTERNS = [
+  /^形式[：:]/,
+  /^目的・戦略[：:]/,
+  /^スタイル・トーン[：:]/
+];
+const WRITER_HEADER_SANITIZE_PATTERN = /^(形式|目的・戦略|スタイル・トーン)[：:]/;
 // コピー開発用の予算を継承すると散文が途中で切れるため、ライター専用の枠を持つ。
 const WRITER_MAX_TOKENS = Number(process.env.CMOAI_PROMPT_WRITER_MAX_TOKENS) || 8000;
 // 実測55〜81秒。prompt工程のリースを超えないよう上限を明示する。
@@ -52,6 +58,16 @@ export async function writeBannerImagePrompt({
       const rawPrompt = String(parsed?.writtenImagePrompt || "");
       const rawNotes = String(parsed?.styleNotes || "");
       lastOutputChars = rawPrompt.length + rawNotes.length;
+      if (!hasWriterHeaderContract(rawPrompt)) {
+        calls.push({
+          attempt,
+          model,
+          outputChars: lastOutputChars,
+          durationMs: Date.now() - startedAt,
+          ok: false
+        });
+        continue;
+      }
       calls.push({
         attempt,
         model,
@@ -107,13 +123,26 @@ function buildWriterAudit({ model, calls, outputChars, fallback }) {
   };
 }
 
+function hasWriterHeaderContract(rawText) {
+  const nonEmptyLines = String(rawText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (nonEmptyLines.length < WRITER_HEADER_LINE_PATTERNS.length) return false;
+  return WRITER_HEADER_LINE_PATTERNS.every((pattern, index) => pattern.test(nonEmptyLines[index]));
+}
+
 function sanitizeWriterText(text, slotTexts) {
   const phrases = (Array.isArray(slotTexts) ? slotTexts : [])
     .map((slot) => String(slot?.text || "").trim())
     .filter((phrase) => phrase.length >= 4);
   return String(text || "")
     .split(/\r?\n/)
-    .filter((line) => !phrases.some((phrase) => line.includes(phrase)))
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (WRITER_HEADER_SANITIZE_PATTERN.test(trimmed)) return true;
+      return !phrases.some((phrase) => line.includes(phrase));
+    })
     .join("\n")
     .trim();
 }

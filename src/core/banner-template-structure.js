@@ -63,10 +63,10 @@ export function enforceTemplateStructure({ templateZones, generatedZones }) {
   });
 
   const zones = sourceZones.map((sourceZone, zoneIndex) => ({
-    name: `Zone ${zoneIndex + 1}`,
+    name: String(sourceZone.name || modelZones[zoneIndex]?.name || ""),
     position: sourceZone.position,
-    purpose: `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`,
-    background: String(modelZones[zoneIndex]?.background || ""),
+    purpose: String(modelZones[zoneIndex]?.purpose || `テンプレのZone ${zoneIndex + 1}構造・視線順・要素役割を維持する`),
+    backgroundStyle: String(modelZones[zoneIndex]?.backgroundStyle || sourceZone.backgroundStyle || ""),
     backgroundColorRole: sourceZone.backgroundColorRole,
     elements: sourceZone.elements.map((sourceElement, elementIndex) => {
       const match = generatedBySlotId.get(sourceElement.slotId);
@@ -172,8 +172,10 @@ export function buildClosedStructureInstruction(contract, selectedAssetPolicy = 
 
 function normalizeTemplateZones(templateZones) {
   return (Array.isArray(templateZones) ? templateZones : []).map((zone, zoneIndex) => ({
+    name: String(zone?.name || ""),
     position: String(zone?.position || zone?.area || ""),
     purpose: String(zone?.purpose || zone?.role || ""),
+    backgroundStyle: String(zone?.backgroundStyle || ""),
     backgroundColorRole: String(zone?.backgroundColorRole || ""),
     elements: (Array.isArray(zone?.elements) ? zone.elements : []).map((element, elementIndex) => ({
       type: normalizeElementType(element?.type),
@@ -184,6 +186,7 @@ function normalizeTemplateZones(templateZones) {
       content: String(element?.type === "shape" ? (element?.description || element?.content || "") : ""),
       position: clonePlainObject(element?.position),
       size: String(element?.size || ""),
+      font: String(element?.font || ""),
       effect: String(element?.effect || ""),
       targetChars: element?.charCount ?? element?.characterCount ?? ""
     }))
@@ -203,7 +206,7 @@ function projectElement(source, generated = {}) {
     content: type === "shape" ? projectedShape.content : generatedContent,
     position: clonePlainObject(source.position),
     size: source.size,
-    font: type === "text" ? String(generated?.font || "") : "",
+    font: String(generated?.font || source?.font || ""),
     color: type === "text" ? String(generated?.color || "") : "",
     effect: type === "shape" ? projectedShape.effect : source.effect,
     targetChars: source.targetChars,
