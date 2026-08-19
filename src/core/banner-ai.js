@@ -191,6 +191,12 @@ export async function generateBannerCreativeProposal({
   result.writtenImagePrompt = regulatedWriterText.writtenImagePrompt;
   result.styleNotes = regulatedWriterText.styleNotes;
   result.regulationCheck = mergeRegulationCheck(result.regulationCheck, regulatedWriterText.regulationCheck);
+  if (writerResult.writerAudit?.fallback === true) {
+    result.reviewNotes = [
+      result.reviewNotes,
+      "画像プロンプトライターが失敗したため旧方式プロンプトで生成（次回の画像生成時に自動再試行）"
+    ].filter(Boolean).join("\n");
+  }
   result.promptGenerationAudit = finalizePromptGenerationAudit({
     ...audit,
     writer: writerResult.writerAudit

@@ -63,7 +63,7 @@ export async function reconcileBannerPipeline(projectRoot, bannerId, context = {
     const runtimeContext = buildBannerPipelineContext(current, context);
     const expectedInputHashes = buildPipelineInputHashes(runtimeContext);
     const currentOutputHashes = buildPipelineOutputHashes(runtimeContext);
-    const pipelineNodes = reconcilePipelineState(current.pipelineNodes, expectedInputHashes, currentOutputHashes);
+    const pipelineNodes = reconcilePipelineState(current.pipelineNodes, expectedInputHashes, currentOutputHashes, current);
     const nextNode = nextPipelineNode({ ...current, pipelineNodes }, expectedInputHashes, currentOutputHashes);
     banners[index] = normalizeBanner({ ...current, pipelineNodes, updatedAt: new Date().toISOString() });
     await writeJson(projectRoot, BANNERS_PATH, banners);
@@ -1016,7 +1016,7 @@ export async function claimBannerPromptGeneration(projectRoot, bannerId, claim) 
       const runtimeContext = buildBannerPipelineContext(current, inferenceWorkspace || {});
       const expectedInputHashes = buildPipelineInputHashes(runtimeContext);
       const currentOutputHashes = buildPipelineOutputHashes(runtimeContext);
-      basePipelineNodes = reconcilePipelineState(current.pipelineNodes, expectedInputHashes, currentOutputHashes);
+      basePipelineNodes = reconcilePipelineState(current.pipelineNodes, expectedInputHashes, currentOutputHashes, current);
       startNode = nextPipelineNode({ ...current, pipelineNodes: basePipelineNodes }, expectedInputHashes, currentOutputHashes);
       inputHash = clean(expectedInputHashes[startNode]);
     }
