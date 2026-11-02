@@ -3,7 +3,7 @@
 CMO AI Liteは、広告運用者が「前提情報 → 事実リサーチ → WHO-WHAT戦略 → バナー画像テンプレ → バナー制作」を実施するためのダイレクトマーケティングに特化したAIシステムです。
 データはすべてローカルPCのフォルダに保存されます。
 
-[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](https://lin.ee/ZnqxpPn)
+[![CMO AI Lite 紹介画像](docs/readme-assets/cmo-ai-lite-overview.png)](docs/setup-manual.md)
 
 ## ダウンロード
 
@@ -11,6 +11,16 @@ CMO AI Liteは、広告運用者が「前提情報 → 事実リサーチ → WH
 
 ZIPを解凍すると `CMO-AI-Lite` フォルダになります。
 Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git` でも取得できます。
+
+## マニュアル
+
+セットアップからバナー制作まで、GitHub上でマニュアルを読めます。LINE登録は不要です。
+
+| マニュアル | 内容 |
+| --- | --- |
+| **[セットアップマニュアル](docs/setup-manual.md)** | Windows / macOSの準備、インストール、APIキー設定、起動、トラブル対処 |
+| **[利用マニュアル](docs/user-manual.md)** | 案件作成、リサーチ、WHO-WHAT戦略、バナー生成・修正、テンプレ管理 |
+| **[動画マニュアル](https://youtu.be/OXbziptw5dk)** | 画面を見ながら使い方を確認 |
 
 ## できること
 
@@ -20,7 +30,7 @@ Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git`
 - **バナー画像テンプレ** — 自社制作NO.001〜100の標準テンプレと新規テンプレ化
 - **バナー制作** — copyBrief + promptJson → `gpt-image-2` による画像生成
 
-[![CMO AI Lite でできること](docs/readme-assets/cmo-ai-lite-cando.png)](https://lin.ee/ZnqxpPn)
+[![CMO AI Lite でできること](docs/readme-assets/cmo-ai-lite-cando.png)](docs/user-manual.md)
 
 ## 利用条件
 
@@ -35,7 +45,7 @@ Gitを利用する場合は `git clone https://github.com/k4415/CMO-AI-Lite.git`
 
 - **Node.js 20以上**
 - **OpenAI APIキー**（事実抽出、WHO-WHAT、バナー Stage 2、`gpt-image-2` 画像生成に使用、従量課金）
-- **Anthropic APIキー**（バナー Stage 1 の copyplan に使用）
+- **Anthropic APIキー**（バナーのコピー設計・デザイン散文の作成に使用、従量課金）
 - LP分析用Chromeは `npm install` 時に自動準備（失敗時は `npm run setup-browser`）
 
 ## セットアップ
@@ -61,11 +71,7 @@ npm run dev
 5. **バナー案を追加** — 戦略・テンプレ・参照画像を選び、最大5枚まで追加
 6. **画像生成** — `gpt-image-2` で完成画像を出力
 
-💡セットアップマニュアル・利用マニュアルはLINEにてお配りしています。
-
-↓　↓　↓　↓　↓
-
-**[LINEに登録してマニュアルを受け取る](https://lin.ee/ZnqxpPn)**
+詳しい操作手順と画面画像は、[セットアップマニュアル](docs/setup-manual.md)・[利用マニュアル](docs/user-manual.md)をご覧ください。
 
 ## Claude Code / Codex から使う
 
@@ -76,7 +82,7 @@ npm run dev
 - 利用者スキル（4件）: `.claude/skills/` および `.agents/skills/`
   - `cmoai-research` / `cmoai-who-what` / `cmoai-template` / `cmoai-banner`
 
-エージェントのサブスク実行ではテキスト生成はローカル作業モデルで行い、UI/API実行では Stage 1 copyplan に Anthropic、Stage 2 と画像生成に OpenAI を使います。
+エージェントのサブスク実行ではテキスト生成はローカル作業モデルで行い、UI/API実行ではコピー設計・デザイン散文の作成に Anthropic、Stage 2 と画像生成に OpenAI を使います。
 
 ## データとAPIキーの保存場所
 
