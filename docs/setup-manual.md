@@ -242,6 +242,12 @@ APIキーを保存し直すだけでは解消しません。
 - 画像生成はgpt-image-2、品質の既定値はmediumです
 - CMO AI Liteは厳密なOSSではなく、株式会社Icraが権利を持つソース公開版です。利用前に[LICENSE](https://github.com/k4415/CMO-AI-Lite/blob/main/LICENSE)を確認してください
 
+## CMO AI Pro
+
+CMO AI Proでは、バナー広告に加えて、**ショート動画・記事LP・漫画広告**なども制作できます。
+
+**[CMO AI Proの詳細を見る](https://www.cmo-ai.pro/)**
+
 ---
 
 [動画マニュアルを見る](https://youtu.be/OXbziptw5dk)
